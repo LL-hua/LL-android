@@ -1,0 +1,36 @@
+apply plugin: 'com.android.application'
+
+android {
+    namespace 'com.hdm'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.hdm"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    // ===== 配置签名信息 =====
+    signingConfigs {
+        release {
+            // 指向你刚才生成的 keystore 路径
+            storeFile file(System.getProperty("user.home") + "/hdm-release.keystore")
+            storePassword "123456"  // 改成你刚才设置的密码
+            keyAlias "hdm"
+            keyPassword "123456"    // 改成你刚才设置的密码
+        }
+    }
+
+    buildTypes {
+        release {
+            // 使用上面的签名
+            signingConfig signingConfigs.release
+            // 开启代码压缩和资源优化 (可选，能减小包体积)
+            minifyEnabled false 
+            // 开启资源压缩
+            shrinkResources false
+        }
+    }
+}
