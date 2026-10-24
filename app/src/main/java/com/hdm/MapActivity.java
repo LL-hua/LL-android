@@ -2,12 +2,16 @@ package com.hdm;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.FrameLayout;
@@ -90,6 +94,22 @@ public class MapActivity extends Activity {
         startGps();
     }
 
+    // ============================================================
+    // 从设置页面回来后，自动重新检查并开启 GPS
+    // ============================================================
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // 如果已经有定位权限，且之前没在监听（说明是刚从没开GPS的设置页退回来）
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                if (lm != null && listener == null) {
+                    startGps();
+                }
+            }
+        }
+    }
+
     private void loadRoute() {
         try {
             List<double[]> route = LL.dantiaoxianlu(app.data.pqx, 0, 10.0);
@@ -101,6 +121,7 @@ public class MapActivity extends Activity {
     }
 
     private void startGps() {
+        // 1. 动态权限检查
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
                 tvInfo.setText("正在申请 GPS 权限...");
@@ -112,9 +133,34 @@ public class MapActivity extends Activity {
             }
         }
 
+        lm = (LocationManager) getSystemService(LOCATION_SERVICE);
+
+        // 2. 【核心新增】检查手机系统 GPS 开关是否打开
+        boolean isGpsEnabled = lm.isProviderEnabled(LocationManager.GPS_PROVIDER);
+
+        if (!isGpsEnabled) {
+            tvInfo.setText("❌ 手机 GPS 未开启");
+            
+            // 弹窗提示并跳转到设置页
+            new AlertDialog.Builder(this)
+                    .setTitle("位置服务未开启")
+                    .setMessage("为了获取实时桩号和偏距，请打开系统的位置信息（GPS）开关。")
+                    .setPositiveButton("去开启", new DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(DialogInterface dialog, int which) {
+                            // 跳转到系统定位设置页
+                            Intent intent = new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS);
+                            startActivity(intent);
+                        }
+                    })
+                    .setNegativeButton("取消", null)
+                    .show();
+            return; // 没开 GPS，直接返回
+        }
+
+        // 3. 权限和开关都OK，开始定位
         tvInfo.setText("等待 GPS 定位...");
 
-        lm = (LocationManager) getSystemService(LOCATION_SERVICE);
         listener = new LocationListener() {
             @Override
             public void onLocationChanged(Location loc) {

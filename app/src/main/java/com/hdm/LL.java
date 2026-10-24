@@ -19,28 +19,72 @@ public class LL {
             return String.format("K%d+%06.2f", km, m);
     }
 
-    /// 度分秒（DDD.MMSS）→ 弧度
-    public static double hua_DmsToRadians(double dms) {
-        int degrees = (int) dms;
-        double fractional = dms - degrees;
-        int minutes = (int) (fractional * 100);
-        double seconds = (fractional * 100 - minutes) * 100;
-        double totalDegrees = degrees + minutes / 60.0 + seconds / 3600.0;
-        return totalDegrees * Math.PI / 180.0;
+/// 度分秒（DDD.MMSS）→ 弧度 (修复精度丢失Bug)
+public static double hua_DmsToRadians(double dms) {
+    // 保留正负号，因为测量方位角有时会有负数
+    int sign = dms >= 0 ? 1 : -1;
+    dms = Math.abs(dms);
+
+    // 提取度，并四舍五入去掉浮点误差
+    int degrees = (int) dms;
+    
+    // 剩下的分秒部分
+    double fractional = dms - degrees;
+    double ms = fractional * 100.0;
+    
+    // 核心修复：用 Math.round 对分进行四舍五入，解决 28.99999 变成 28 的问题
+    int minutes = (int) Math.round(ms);
+    
+    // 计算秒
+    double seconds = (ms - minutes) * 100.0;
+
+    // 如果秒接近60（比如 59.999秒），进1分
+    if (seconds >= 59.9999) {
+        seconds = 0;
+        minutes += 1;
     }
 
-    /// 弧度 → 度分秒（DDD.MMSS）
-    public static double hua_radiansToDMS(double radians) {
-        double degrees = radians * (180 / Math.PI);
-        int d = (int) Math.floor(degrees);
-        double remaining = (degrees - d) * 60;
-        int m = (int) Math.floor(remaining);
-        double s = (remaining - m) * 60;
-        String mm = m < 10 ? "0" + m : "" + m;
-        String ss = s < 10 ? String.format("0%.1f", s) : String.format("%.1f", s);
-        String dfm = d + mm + ss;
-        return Math.round(Double.parseDouble(dfm)) / 10000.0;
+    // 如果分到了60，进1度
+    if (minutes >= 60) {
+        minutes = 0;
+        degrees += 1;
     }
+
+    // 组合
+    double totalDegrees = degrees + minutes / 60.0 + seconds / 3600.0;
+    return sign * totalDegrees * Math.PI / 180.0;
+}
+
+/// 弧度 → 度分秒（DDD.MMSS）(修复进位Bug)
+public static double hua_radiansToDMS(double radians) {
+    double degrees = radians * (180 / Math.PI);
+    
+    // 处理负数
+    int sign = degrees >= 0 ? 1 : -1;
+    degrees = Math.abs(degrees);
+    
+    int d = (int) degrees;
+    double remaining = (degrees - d) * 60;
+    int m = (int) remaining;
+    double s = (remaining - m) * 60;
+    
+    // 核心修复：如果秒四舍五入后是60，秒归零，分进一
+    s = Math.round(s * 10.0) / 10.0;
+    if (s >= 60.0) {
+        s = 0.0;
+        m += 1;
+    }
+    if (m >= 60) {
+        m = 0;
+        d += 1;
+    }
+    
+    String mm = m < 10 ? "0" + m : "" + m;
+    String ss = s < 10 ? String.format("0%.1f", s) : String.format("%.1f", s);
+    
+    String dfm = d + mm + ss;
+    return sign * (Math.round(Double.parseDouble(dfm)) / 10000.0);
+}
 
     // ============================================================
     // 2. 方位角 + 距离

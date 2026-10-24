@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==========================================
-# hdm 正式版一键打包脚本
+# hdm 纯本地一键打包+安装脚本 (不复制外部)
 # ==========================================
 
 echo "======================================"
@@ -10,27 +10,34 @@ echo "======================================"
 # 执行正式版打包命令
 gradle assembleRelease
 
-# 检查上一条命令是否成功 ($? == 0 表示成功)
+# 检查是否成功
 if [ $? -eq 0 ]; then
     echo ""
-    echo "✅ 编译成功！正在导出 APK..."
+    echo "✅ 编译成功！正在定位内部 APK..."
     
-    # 提取出来的文件名（带时间戳，防止覆盖旧版）
-    TARGET_FILE=~/storage/downloads/hdm_Release_$(date +%m%d_%H%M).apk
+    # 直接在当前目录的 build 文件夹里找最终生成的包
+    TARGET_FILE="app/build/outputs/apk/release/app-release.apk"
     
-    # 拷贝文件
-    cp app/build/outputs/apk/release/app-release.apk $TARGET_FILE
+    # 检查包是否真的存在
+    if [ -f "$TARGET_FILE" ]; then
+        # 计算大小
+        FILE_SIZE=$(du -k "$TARGET_FILE" | cut -f1)
+        
+        echo "🎉 搞定！"
+        echo "📦 包体积: ${FILE_SIZE} KB"
+        echo "📍 当前路径: $TARGET_FILE"
+        
+        # 调用系统安装器直接安装该路径下的包
+        echo ""
+        echo "⏳ 正在唤起系统安装器..."
+        termux-open "$TARGET_FILE"
+    else
+        echo "❌ 报错：编译成功了，但没在当前目录找到 app-release.apk"
+    fi
     
-    # 计算文件大小 (单位 KB)
-    FILE_SIZE=$(du -k $TARGET_FILE | cut -f1)
-    
-    echo "🎉 搞定！"
-    echo "📦 包体积: ${FILE_SIZE} KB"
-    echo "📍 路径: 手机【下载】目录 / $(basename $TARGET_FILE)"
     echo "======================================"
 else
     echo ""
     echo "❌ 编译失败！请往上翻查看红色的报错信息。"
     echo "======================================"
 fi
-

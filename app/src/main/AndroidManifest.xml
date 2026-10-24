@@ -10,8 +10,8 @@
     <application
         android:name=".MyApp"
         android:allowBackup="true"
-        android:icon="@android:drawable/ic_menu_compass"
-        android:label="hdm 断面计算"
+        android:icon="@drawable/ico"
+        android:label="刘建华"
         android:theme="@android:style/Theme.Light.NoTitleBar">
         
         <activity android:name=".MainActivity" android:exported="true">
