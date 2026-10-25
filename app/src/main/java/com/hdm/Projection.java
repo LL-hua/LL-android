@@ -334,15 +334,6 @@ public class Projection {
     // ============================================================
     // 5. GPS → 当地 XY（组合）
     // ============================================================
-    /**
-     * @param lon 经度
-     * @param lat 纬度
-     * @param proj "gauss" / "utm"
-     * @param ctrlLonLat 控制点经纬度 N×2
-     * @param ctrlXy 控制点 XY N×2
-     * @param center 中央子午线（高斯用）
-     * @return [X, Y]
-     */
     public static double[] gps2Xy(double lon, double lat, String proj,
             double[][] ctrlLonLat, double[][] ctrlXy,
             double center) {
@@ -371,7 +362,6 @@ public class Projection {
             double[] targetXy = new double[n * 2];
             for (int i = 0; i < n; i++) {
                 double[] ls = utm_proj(ctrlLonLat[i][0], ctrlLonLat[i][1]);
-                // utm_proj 返回 [northing, easting, zone]
                 sourceXy[i * 2] = ls[0]; // northing → X
                 sourceXy[i * 2 + 1] = ls[1]; // easting  → Y
                 targetXy[i * 2] = ctrlXy[i][0];
@@ -383,6 +373,49 @@ public class Projection {
             cs4[0], cs4[1], cs4[2], cs4[3]);
         }
 
+        return new double[]{0, 0};
+    }
+
+    // ============================================================
+    // 6. 本地 XY → GPS（用于在线地图底图，反算经纬度）
+    // ============================================================
+    public static double[] xy2Gps(double x, double y, String proj,
+            double[][] ctrlLonLat, double[][] ctrlXy, double center) {
+        String p = proj == null ? "" : proj.toLowerCase();
+        int n = ctrlLonLat.length;
+        if (n == 0) return new double[]{0, 0};
+
+        double[] sourceXy = new double[n * 2];
+        double[] targetXy = new double[n * 2];
+
+        for (int i = 0; i < n; i++) {
+            if (p.contains("gao")) {
+                double[] ls = gauss_proj(ctrlLonLat[i][0], ctrlLonLat[i][1], center);
+                sourceXy[i * 2] = ls[0]; sourceXy[i * 2 + 1] = ls[1];
+            } else if (p.contains("utm")) {
+                double[] ls = utm_proj(ctrlLonLat[i][0], ctrlLonLat[i][1]);
+                sourceXy[i * 2] = ls[0]; sourceXy[i * 2 + 1] = ls[1];
+            }
+            targetXy[i * 2] = ctrlXy[i][0];
+            targetXy[i * 2 + 1] = ctrlXy[i][1];
+        }
+
+        // 算四参数
+        double[] cs4 = cs4(sourceXy, targetXy);
+        double dx = cs4[0], dy = cs4[1], rot = cs4[2], scale = cs4[3];
+
+        // 四参数逆变换：目标XY -> 源投影XY
+        double x1 = x - dx;
+        double y1 = y - dy;
+        double x2 = (x1 * Math.cos(-rot) - y1 * Math.sin(-rot)) / scale;
+        double y2 = (x1 * Math.sin(-rot) + y1 * Math.cos(-rot)) / scale;
+
+        // 投影反算
+        if (p.contains("gao")) {
+            return gauss_unproj(x2, y2, center);
+        } else if (p.contains("utm")) {
+            return utm_unproj(x2, y2, false, utm_zone(center));
+        }
         return new double[]{0, 0};
     }
 }

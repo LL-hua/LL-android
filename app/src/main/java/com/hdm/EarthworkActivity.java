@@ -16,6 +16,7 @@ public class EarthworkActivity extends BaseNavActivity {
     private TextView tvInfo;
     private EditText etStation;
     private EarthworkView sectionView;
+    private LinearLayout content;
 
     @Override
     protected String currentTab() { return "earth"; }
@@ -28,15 +29,31 @@ public class EarthworkActivity extends BaseNavActivity {
         super.onCreate(savedInstanceState);
         app = (MyApp) getApplication();
 
-        if (app.data == null) {
-            Toast.makeText(this, "项目未加载", Toast.LENGTH_SHORT).show();
-            finish();
-            return;
-        }
-
-        LinearLayout content = new LinearLayout(this);
+        content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(dp(20), dp(20), dp(20), dp(20));
+        setContent(content);
+        
+        initUI();
+    }
+
+    @Override
+    protected void onProjectLoaded() {
+        initUI();
+    }
+
+    private void initUI() {
+        content.removeAllViews();
+
+        if (app.data == null) {
+            TextView tvEmpty = new TextView(this);
+            tvEmpty.setText("请点击右上角选择项目文件");
+            tvEmpty.setTextSize(16);
+            tvEmpty.setGravity(Gravity.CENTER);
+            content.addView(tvEmpty, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT));
+            return;
+        }
 
         tvInfo = new TextView(this);
         tvInfo.setText("桩号总数: " + app.data.Stations().length);
@@ -48,8 +65,7 @@ public class EarthworkActivity extends BaseNavActivity {
         etStation = new EditText(this);
         etStation.setHint("桩号（米）");
         etStation.setText("103200");
-        etStation.setLayoutParams(new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        etStation.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         inputRow.addView(etStation);
 
         Button btnCalc = new Button(this);
@@ -59,14 +75,12 @@ public class EarthworkActivity extends BaseNavActivity {
         content.addView(inputRow);
 
         FrameLayout chartBox = new FrameLayout(this);
-        chartBox.setLayoutParams(new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+        chartBox.setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
         sectionView = new EarthworkView(this);
         sectionView.setBackgroundColor(0xFFFFFFFF);
         sectionView.setLayoutParams(new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT));
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         chartBox.addView(sectionView);
 
         TextView btnReset = new TextView(this);
@@ -77,8 +91,7 @@ public class EarthworkActivity extends BaseNavActivity {
         btnReset.setPadding(20, 5, 20, 10);
         btnReset.setGravity(Gravity.CENTER);
         FrameLayout.LayoutParams lpReset = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP | Gravity.RIGHT);
         lpReset.topMargin = 10;
         lpReset.rightMargin = 10;
@@ -86,7 +99,6 @@ public class EarthworkActivity extends BaseNavActivity {
         chartBox.addView(btnReset);
 
         content.addView(chartBox);
-        setContent(content);
 
         btnReset.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -101,8 +113,7 @@ public class EarthworkActivity extends BaseNavActivity {
                 try {
                     station = Double.parseDouble(input);
                 } catch (Exception e) {
-                    Toast.makeText(EarthworkActivity.this, "桩号格式错误",
-                            Toast.LENGTH_SHORT).show();
+                    Toast.makeText(EarthworkActivity.this, "桩号格式错误", Toast.LENGTH_SHORT).show();
                     return;
                 }
 
@@ -110,14 +121,12 @@ public class EarthworkActivity extends BaseNavActivity {
                 try {
                     r = app.data.Query(station);
                 } catch (Exception e) {
-                    Toast.makeText(EarthworkActivity.this, "计算异常: " + e.getMessage(),
-                            Toast.LENGTH_LONG).show();
+                    Toast.makeText(EarthworkActivity.this, "计算异常: " + e.getMessage(), Toast.LENGTH_LONG).show();
                     return;
                 }
 
                 if (!r.success) {
-                    Toast.makeText(EarthworkActivity.this, "失败: " + r.errorMessage,
-                            Toast.LENGTH_LONG).show();
+                    Toast.makeText(EarthworkActivity.this, "失败: " + r.errorMessage, Toast.LENGTH_LONG).show();
                     sectionView.setData(null);
                     return;
                 }

@@ -1,10 +1,14 @@
 package com.hdm;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.view.Gravity;
 import android.view.View;
 import android.view.Window;
@@ -14,11 +18,15 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
+
 public abstract class BaseNavActivity extends Activity {
 
-    protected static final String[] TAB_KEYS   = {"proj", "earth", "layout", "calc", "map"};
-    protected static final String[] TAB_LABELS = {"项目", "土方", "放样", "正反算", "线路图"};
-    protected static final String[] TAB_ICONS  = {"▤", "土", "放", "算", "图"};
+    protected static final String[] TAB_KEYS   = {"earth", "layout", "calc", "map", "realmap"};
+    protected static final String[] TAB_LABELS = {"土方", "放样", "正反算", "平面图", "实景地图"};
+    protected static final String[] TAB_ICONS  = {"土", "放", "算", "图", "地"};
 
     private static final int COLOR_PRIMARY  = 0xFF1976D2;
     private static final int COLOR_NAV_BG   = 0xFFFFFFFF;
@@ -26,7 +34,8 @@ public abstract class BaseNavActivity extends Activity {
     private static final int COLOR_TAB_ON   = 0xFF1976D2;
     private static final int COLOR_TAB_OFF  = 0xFF9E9E9E;
 
-    private FrameLayout contentBox;
+    protected FrameLayout contentBox;
+    protected TextView tvProj;
 
     protected abstract String currentTab();
     protected abstract String pageTitle();
@@ -35,23 +44,15 @@ public abstract class BaseNavActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // ===== 沉浸式状态栏设置 =====
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             Window window = getWindow();
             window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
             window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
-            window.setStatusBarColor(COLOR_PRIMARY); // 状态栏背景设为蓝色
-            
-            // 如果 Android 6.0 以上，强制状态栏字体为白色
+            window.setStatusBarColor(COLOR_PRIMARY);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                View decor = window.getDecorView();
-                decor.setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR); 
-                // 注意：SYSTEM_UI_FLAG_LIGHT_STATUS_BAR 是让字体变黑的。
-                // 如果要纯白字体，传入 0 即可。我们这里是蓝底，所以要清除这个 flag，保证白字。
-                decor.setSystemUiVisibility(0);
+                window.getDecorView().setSystemUiVisibility(0);
             }
         }
-        // ===========================
 
         LinearLayout rootLayout = new LinearLayout(this);
         rootLayout.setOrientation(LinearLayout.VERTICAL);
@@ -69,16 +70,19 @@ public abstract class BaseNavActivity extends Activity {
         tvTitle.setTextColor(Color.WHITE);
         header.addView(tvTitle);
 
-        TextView tvProj = new TextView(this);
-        MyApp app = (MyApp) getApplication();
-        String projName = (app != null && app.currentProjectName != null)
-                ? app.currentProjectName : "";
-        tvProj.setText(projName);
-        tvProj.setTextSize(12);
+        tvProj = new TextView(this);
+        updateProjName();
+        tvProj.setTextSize(13);
         tvProj.setTextColor(0xCCFFFFFF);
         tvProj.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
         tvProj.setLayoutParams(new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        tvProj.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showProjectDialog();
+            }
+        });
         header.addView(tvProj);
 
         rootLayout.addView(header);
@@ -91,6 +95,9 @@ public abstract class BaseNavActivity extends Activity {
         rootLayout.addView(buildBottomNav());
 
         setContentView(rootLayout);
+
+        // 自动静默恢复上次的项目
+        autoLoadLastProject();
     }
 
     protected void setContent(View view) {
@@ -99,6 +106,105 @@ public abstract class BaseNavActivity extends Activity {
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT));
     }
+
+    // 核心：从 SharedPreferences 里读上次的路径
+    private void autoLoadLastProject() {
+        SharedPreferences sp = getSharedPreferences("hdm_config", MODE_PRIVATE);
+        String lastPath = sp.getString("last_project", null);
+        if (lastPath != null) {
+            File file = new File(lastPath);
+            if (file.exists()) {
+                loadProject(file, true); // true 表示静默加载
+            }
+        }
+    }
+
+    protected void showProjectDialog() {
+        File sd = Environment.getExternalStorageDirectory();
+        File dir = new File(sd, "1hdm");
+        if (!dir.exists()) dir.mkdirs();
+
+        File[] files = dir.listFiles();
+        final List<File> xlsxFiles = new ArrayList<>();
+        final List<String> xlsxNames = new ArrayList<>();
+
+        if (files != null) {
+            for (File f : files) {
+                if (f.isFile() && f.getName().toLowerCase().endsWith(".xlsx")) {
+                    xlsxFiles.add(f);
+                    xlsxNames.add(f.getName());
+                }
+            }
+        }
+
+        if (xlsxFiles.isEmpty()) {
+            Toast.makeText(this, "请把 .xlsx 放到 /sdcard/1hdm/", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        final String[] items = xlsxNames.toArray(new String[0]);
+        new AlertDialog.Builder(this)
+                .setTitle("选择项目文件")
+                .setItems(items, new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        loadProject(xlsxFiles.get(which), false); // false 表示手动选择
+                    }
+                })
+                .show();
+    }
+
+    private void loadProject(final File xlsxFile, final boolean isSilent) {
+        if (!isSilent) tvProj.setText("加载中...");
+        
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    final ProjectData d = XlsxProjectData.Load(xlsxFile.getAbsolutePath());
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            MyApp app = (MyApp) getApplication();
+                            app.data = d;
+                            app.currentProjectName = xlsxFile.getName();
+                            app.currentProjectFile = xlsxFile;
+                            
+                            // 保存到本地
+                            SharedPreferences sp = getSharedPreferences("hdm_config", MODE_PRIVATE);
+                            sp.edit().putString("last_project", xlsxFile.getAbsolutePath()).apply();
+
+                            updateProjName();
+                            if (!isSilent) {
+                                Toast.makeText(BaseNavActivity.this, "已加载: " + xlsxFile.getName(), Toast.LENGTH_SHORT).show();
+                            }
+                            onProjectLoaded();
+                        }
+                    });
+                } catch (final Throwable e) {
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            updateProjName();
+                            if (!isSilent) {
+                                Toast.makeText(BaseNavActivity.this, "加载失败: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                            }
+                        }
+                    });
+                }
+            }
+        }).start();
+    }
+
+    protected void updateProjName() {
+        if (tvProj == null) return;
+        MyApp app = (MyApp) getApplication();
+        String projName = (app != null && app.currentProjectName != null)
+                ? app.currentProjectName : "未选择项目";
+        tvProj.setText(projName);
+    }
+
+    protected void onProjectLoaded() {}
 
     private View buildBottomNav() {
         LinearLayout wrapper = new LinearLayout(this);
@@ -163,16 +269,17 @@ public abstract class BaseNavActivity extends Activity {
         if (key.equals(currentTab())) return;
 
         Class<?> target = null;
-        if ("proj".equals(key))   target = MainActivity.class;
-        if ("earth".equals(key))  target = EarthworkActivity.class;
-        if ("layout".equals(key)) target = LayoutActivity.class;
-        if ("calc".equals(key))   target = CalcActivity.class;
-        if ("map".equals(key))    target = MapActivity.class;
+        if ("earth".equals(key))   target = EarthworkActivity.class;
+        if ("layout".equals(key))  target = LayoutActivity.class;
+        if ("calc".equals(key))    target = CalcActivity.class;
+        if ("map".equals(key))     target = MapActivity.class;
+        if ("realmap".equals(key)) target = RealMapActivity.class;
+        
         if (target == null) return;
 
         MyApp app = (MyApp) getApplication();
-        if (!"proj".equals(key) && (app == null || app.data == null)) {
-            Toast.makeText(this, "请先在\"项目\"里选择项目", Toast.LENGTH_SHORT).show();
+        if (app == null || app.data == null) {
+            Toast.makeText(this, "请先点击右上角选择项目", Toast.LENGTH_SHORT).show();
             return;
         }
 

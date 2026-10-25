@@ -24,16 +24,13 @@ public class MainActivity extends BaseNavActivity {
     private Spinner spProject;
 
     @Override
-    protected String currentTab() { return "proj"; }
+    protected String currentTab() { return ""; } // 不激活底部导航的任何 Tab
 
     @Override
     protected String pageTitle() { return "项目"; }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        if (android.os.Build.VERSION.SDK_INT >= 21) {
-            getWindow().setStatusBarColor(0xFF1976D2);
-        }
         super.onCreate(savedInstanceState);
 
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
