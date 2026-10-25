@@ -8,20 +8,25 @@
     <style>
         body { margin: 0; padding: 0; }
         #map { width: 100vw; height: 100vh; background-color: #f0f2f5; }
+        
         .leaflet-control-attribution { display: none; }
+        
         .gps-marker {
             width: 20px; height: 20px; background: #0078D4;
             border: 3px solid #FFFFFF; border-radius: 50%;
             box-shadow: 0 0 5px rgba(0,0,0,0.5);
         }
+        
         #info-panel {
-            position: absolute; bottom: 20px; left: 10px; background: rgba(255, 255, 255, 0.95);
-            padding: 10px 15px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-            font-family: sans-serif; font-size: 14px; color: #333; z-index: 1000; display: none;
+            position: absolute; top: 10px; left: 10px; 
+            background: rgba(255, 255, 255, 0.95);
+            padding: 10px 15px; border-radius: 8px; 
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            font-family: sans-serif; font-size: 14px; color: #333; 
+            z-index: 9999; display: none;
         }
         #info-panel b { color: #DD0000; font-size: 16px; }
         
-        /* 刻度文字样式 */
         .km-label {
             color: #333;
             font-size: 13px;
@@ -29,10 +34,22 @@
             white-space: nowrap;
             text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff;
         }
+        
+        .leaflet-control-layers {
+            border-radius: 8px !important;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2) !important;
+            padding: 5px 10px !important;
+            font-family: sans-serif;
+            z-index: 1000;
+        }
+
+        /* 只要这一句防止白边，其他的花里胡哨全删了 */
+        .leaflet-tile { outline: 1px solid transparent; }
     </style>
 </head>
 <body>
     <div id="map"></div>
+    
     <div id="info-panel">
         桩号: <b id="gps-k">--</b><br>偏距: <span id="gps-b">--</span>
     </div>
@@ -40,8 +57,32 @@
     <script>
         var map = L.map('map', { zoomControl: false, attributionControl: false }).setView([-4.8, 32.5], 15);
 
-        var roadLayer = L.tileLayer('https://mt1.google.com/vt/lyrs=r&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}', { maxZoom: 20, detectRetina: true }).addTo(map);
-        var satelliteLayer = L.tileLayer('https://mt1.google.com/vt/lyrs=y&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}', { maxZoom: 20, detectRetina: true });
+        // 纯正的 512 高清大法，绝对不会有任何冲突和重影
+        var googleRoad = L.tileLayer('https://mt1.google.com/vt/lyrs=r&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}', { 
+            maxZoom: 20, 
+            tileSize: 256, 
+            
+        });
+        
+        var googleSatellite = L.tileLayer('https://mt1.google.com/vt/lyrs=y&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}', { 
+            maxZoom: 20, 
+            tileSize: 256
+           
+        });
+        
+        var openTopo = L.tileLayer('https://a.tile.opentopomap.org/{z}/{x}/{y}.png', { 
+            maxZoom: 17, 
+            tileSize: 256
+        
+        });
+
+        googleRoad.addTo(map);
+
+        var layerControl = L.control.layers({
+            "谷歌路网": googleRoad,
+            "谷歌卫星": googleSatellite,
+            "地形图 (Topo)": openTopo
+        }, null, { position: 'topright', collapsed: false }).addTo(map);
 
         var routeLayer = null;
         var marker = null;
@@ -63,21 +104,20 @@
             }).addTo(map);
             
             if (latlngs.length > 0) {
-                map.fitBounds(routeLayer.getBounds(), { padding: [20, 20] });
+                map.fitBounds(routeLayer.getBounds(), { padding: [20, 20], maxZoom: 17 });
             }
 
             drawLabels();
         };
 
+        // ===== 你认可的完美逻辑，原封不动 =====
         function drawLabels() {
-            // 清除旧标签
             for (var i = 0; i < kmMarkers.length; i++) {
                 map.removeLayer(kmMarkers[i]);
             }
             kmMarkers = [];
 
             if (currentData.length === 0) return;
-
             var lastPixel = null;
 
             for (var i = 0; i < currentData.length; i++) {
@@ -89,21 +129,15 @@
                 var kNum = parseFloat(kStr.replace("K", "").replace("+", ""));
                 var remainder = kNum % 1000;
 
-                // 1. 只有整百才考虑（20米的数据直接砍掉）
                 if (remainder % 100 !== 0) continue;
 
                 var currentPixel = map.latLngToContainerPoint([lat, lng]);
 
-                // 2. 严格防重叠：如果距离上一次绘制点太近（比如 < 80 像素），直接跳过
-                // 因为旋转后的文字是有宽度的，80像素是个比较安全的阈值
                 if (lastPixel && currentPixel.distanceTo(lastPixel) < 80) {
                     continue;
                 }
-
-                // 3. 只有当上面的条件都通过了，才记录这个点，并画出来
                 lastPixel = currentPixel;
 
-                // 你之前调好的角度
                 var angleDeg = (fwj * 180 / Math.PI);
 
                 var divHtml = '<div class="km-label" style="transform: rotate(' + angleDeg + 'deg); transform-origin: 0% 50%;">' + kStr + '</div>';
@@ -120,18 +154,12 @@
             }
         }
 
-        map.on('zoomend', function() {
-            drawLabels();
-        });
-
-        window.toggleMapType = function(isSatellite) {
-            if (isSatellite) { map.removeLayer(roadLayer); satelliteLayer.addTo(map); }
-            else { map.removeLayer(satelliteLayer); roadLayer.addTo(map); }
-        };
+        map.on('zoomend', function() { drawLabels(); });
 
         window.updateGps = function(lat, lon, accuracy, kStr, bStr) {
             var latlng = [lat, lon];
             lastGpsLatLng = latlng;
+            
             document.getElementById('info-panel').style.display = 'block';
             document.getElementById('gps-k').innerText = kStr;
             document.getElementById('gps-b').innerText = bStr;

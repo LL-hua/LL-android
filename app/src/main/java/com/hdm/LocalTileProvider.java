@@ -1,34 +1,31 @@
 package com.hdm;
 
-import android.os.Environment;
 import android.webkit.WebResourceResponse;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 
 public class LocalTileProvider {
 
-    public static File getCacheDir() {
-        File sd = Environment.getExternalStorageDirectory();
-        File dir = new File(sd, "1hdm/.map_cache");
-        if (!dir.exists()) dir.mkdirs();
-        return dir;
+    private static TileDatabase dbRoad = null;
+    private static TileDatabase dbSat = null;
+    private static TileDatabase dbTopo = null;
+
+    public static void init(android.content.Context context) {
+        if (dbRoad == null) dbRoad = new TileDatabase(context.getApplicationContext(), "hdm_road.mbtiles");
+        if (dbSat == null) dbSat = new TileDatabase(context.getApplicationContext(), "hdm_sat.mbtiles");
+        if (dbTopo == null) dbTopo = new TileDatabase(context.getApplicationContext(), "hdm_topo.mbtiles");
     }
 
     public static WebResourceResponse interceptTile(String url) {
-        // 只拦截瓦片请求
-        if (!url.contains("google.com/vt") && !url.contains("autonavi.com")) {
-            return null; 
+        if (!url.contains("google.com/vt") && !url.contains("opentopomap.org")) {
+            return null;
         }
 
         try {
-            // 1. 提取 z, x, y
             int x = 0, y = 0, z = 0;
             String[] parts = url.split("&");
             for (String part : parts) {
@@ -37,23 +34,28 @@ public class LocalTileProvider {
                 if (part.contains("z=")) z = Integer.parseInt(part.replaceAll("\\D+", ""));
             }
 
-            // 2. 核心修复：提取图源类型 (r=路网, y=卫星)
-            String type = "unknown";
-            if (url.contains("lyrs=r")) type = "r";
-            else if (url.contains("lyrs=y")) type = "y";
-            else if (url.contains("style=7")) type = "gaode_r";
-            else if (url.contains("style=6")) type = "gaode_y";
-
-            // 3. 文件名带上 type 前缀，彻底分开！
-            File tileFile = new File(getCacheDir(), type + "_" + z + "_" + x + "_" + y + ".png");
-
-            // 本地有缓存，直接返回
-            if (tileFile.exists() && tileFile.length() > 0) {
-                FileInputStream is = new FileInputStream(tileFile);
-                return new WebResourceResponse("image/png", "UTF-8", is);
+            TileDatabase currentDb = null;
+            String urlFormat = "image/png";
+            
+            if (url.contains("google.com/vt")) {
+                if (url.contains("lyrs=r")) {
+                    currentDb = dbRoad;
+                } else if (url.contains("lyrs=y")) {
+                    currentDb = dbSat;
+                }
+            } else if (url.contains("opentopomap.org")) {
+                currentDb = dbTopo;
             }
 
-            // 本地没有，联网下载
+            if (currentDb == null) return null;
+
+            // 1. 查本地数据库
+            byte[] cachedData = currentDb.getTile(z, x, y);
+            if (cachedData != null && cachedData.length > 0) {
+                return new WebResourceResponse(urlFormat, "UTF-8", new ByteArrayInputStream(cachedData));
+            }
+
+            // 2. 联网下载
             URL u = new URL(url);
             HttpURLConnection conn = (HttpURLConnection) u.openConnection();
             conn.setConnectTimeout(5000);
@@ -72,21 +74,16 @@ public class LocalTileProvider {
                 netIs.close();
                 byte[] imageBytes = baos.toByteArray();
 
-                // 存入本地（带 type 前缀）
-                try {
-                    FileOutputStream fos = new FileOutputStream(tileFile);
-                    fos.write(imageBytes);
-                    fos.close();
-                } catch (Exception e) {
-                    e.printStackTrace();
+                // 3. 存进对应数据库
+                if (imageBytes.length > 0) {
+                    currentDb.saveTile(z, x, y, imageBytes);
                 }
 
-                ByteArrayInputStream bais = new ByteArrayInputStream(imageBytes);
-                return new WebResourceResponse("image/png", "UTF-8", bais);
+                return new WebResourceResponse(urlFormat, "UTF-8", new ByteArrayInputStream(imageBytes));
             }
         } catch (Exception e) {
             e.printStackTrace();
         }
-        return null; 
+        return null;
     }
 }

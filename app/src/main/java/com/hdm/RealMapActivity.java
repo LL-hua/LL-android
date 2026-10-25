@@ -26,7 +26,6 @@ public class RealMapActivity extends BaseNavActivity {
 
     private MyApp app;
     private WebView webView;
-    private boolean isSatellite = false;
     private LinearLayout content;
 
     private LocationManager lm;
@@ -87,6 +86,9 @@ public class RealMapActivity extends BaseNavActivity {
         settings.setAllowFileAccessFromFileURLs(true);
         settings.setAllowUniversalAccessFromFileURLs(true);
 
+        // 初始化瓦片数据库
+        LocalTileProvider.init(this);
+
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
@@ -114,32 +116,25 @@ public class RealMapActivity extends BaseNavActivity {
         webView.loadUrl("file:///android_asset/map.html");
         mapBox.addView(webView, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
-        // 右上角：切换卫星
-        TextView btnType = new TextView(this);
-        btnType.setText("卫星"); btnType.setTextSize(14); btnType.setTextColor(0xFF0078D4);
-        btnType.setBackgroundColor(0xEEFFFFFF); btnType.setPadding(dp(16), dp(8), dp(16), dp(8)); btnType.setGravity(Gravity.CENTER);
-        FrameLayout.LayoutParams lpType = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.RIGHT);
-        lpType.topMargin = dp(16); lpType.rightMargin = dp(16);
-        btnType.setLayoutParams(lpType); mapBox.addView(btnType);
-
-        btnType.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                isSatellite = !isSatellite;
-                webView.evaluateJavascript("window.toggleMapType(" + isSatellite + ");", null);
-                ((TextView) v).setText(isSatellite ? "路网" : "卫星");
-            }
-        });
-
-        // 右上角悬浮：定位按钮
+        // ==========================================
+        // 右下角悬浮定位按钮 (小房子 ⌂)
+        // ==========================================
         TextView btnLocate = new TextView(this);
-        btnLocate.setText("📍");
-        btnLocate.setTextSize(20);
+        btnLocate.setText("⌂");
+        btnLocate.setTextSize(32);
+        btnLocate.setTextColor(0xFF0078D4);
         btnLocate.setBackgroundColor(0xEEFFFFFF);
-        btnLocate.setPadding(dp(16), dp(8), dp(16), dp(8));
+        btnLocate.setPadding(dp(16), dp(4), dp(16), dp(8));
         btnLocate.setGravity(Gravity.CENTER);
-        FrameLayout.LayoutParams lpLoc = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.RIGHT);
-        lpLoc.topMargin = dp(60); lpLoc.rightMargin = dp(16);
-        btnLocate.setLayoutParams(lpLoc); mapBox.addView(btnLocate);
+        
+        FrameLayout.LayoutParams lpLoc = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, 
+                FrameLayout.LayoutParams.WRAP_CONTENT, 
+                Gravity.BOTTOM | Gravity.RIGHT);
+        lpLoc.bottomMargin = dp(30); 
+        lpLoc.rightMargin = dp(16);
+        btnLocate.setLayoutParams(lpLoc); 
+        mapBox.addView(btnLocate);
 
         btnLocate.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
@@ -261,7 +256,10 @@ public class RealMapActivity extends BaseNavActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        if (lm != null && listener != null) { try { lm.removeUpdates(listener); } catch (Exception e) {} }
+        // 修复报错：把 removeListener 改回 removeUpdates
+        if (lm != null && listener != null) { 
+            try { lm.removeUpdates(listener); } catch (Exception e) {} 
+        }
         if (webView != null) { webView.destroy(); }
     }
 }

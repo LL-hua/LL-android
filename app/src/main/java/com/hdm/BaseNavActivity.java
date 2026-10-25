@@ -25,7 +25,8 @@ import java.util.List;
 public abstract class BaseNavActivity extends Activity {
 
     protected static final String[] TAB_KEYS   = {"earth", "layout", "calc", "map", "realmap"};
-    protected static final String[] TAB_LABELS = {"土方", "放样", "正反算", "平面图", "实景地图"};
+    // 这里把“实景地图”改成了“在线地图”
+    protected static final String[] TAB_LABELS = {"土方", "放样", "正反算", "平面图", "在线地图"};
     protected static final String[] TAB_ICONS  = {"土", "放", "算", "图", "地"};
 
     private static final int COLOR_PRIMARY  = 0xFF1976D2;
@@ -96,7 +97,6 @@ public abstract class BaseNavActivity extends Activity {
 
         setContentView(rootLayout);
 
-        // 自动静默恢复上次的项目
         autoLoadLastProject();
     }
 
@@ -107,14 +107,13 @@ public abstract class BaseNavActivity extends Activity {
                 FrameLayout.LayoutParams.MATCH_PARENT));
     }
 
-    // 核心：从 SharedPreferences 里读上次的路径
     private void autoLoadLastProject() {
         SharedPreferences sp = getSharedPreferences("hdm_config", MODE_PRIVATE);
         String lastPath = sp.getString("last_project", null);
         if (lastPath != null) {
             File file = new File(lastPath);
             if (file.exists()) {
-                loadProject(file, true); // true 表示静默加载
+                loadProject(file, true);
             }
         }
     }
@@ -148,7 +147,7 @@ public abstract class BaseNavActivity extends Activity {
                 .setItems(items, new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
-                        loadProject(xlsxFiles.get(which), false); // false 表示手动选择
+                        loadProject(xlsxFiles.get(which), false);
                     }
                 })
                 .show();
@@ -170,7 +169,6 @@ public abstract class BaseNavActivity extends Activity {
                             app.currentProjectName = xlsxFile.getName();
                             app.currentProjectFile = xlsxFile;
                             
-                            // 保存到本地
                             SharedPreferences sp = getSharedPreferences("hdm_config", MODE_PRIVATE);
                             sp.edit().putString("last_project", xlsxFile.getAbsolutePath()).apply();
 

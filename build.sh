@@ -29,8 +29,7 @@ if [ $? -eq 0 ]; then
         
         # 调用系统安装器直接安装该路径下的包
         echo ""
-        echo "⏳ 正在唤起系统安装器..."
-        termux-open "$TARGET_FILE"
+        
     else
         echo "❌ 报错：编译成功了，但没在当前目录找到 app-release.apk"
     fi
