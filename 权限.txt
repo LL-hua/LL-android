@@ -1,1 +1,11 @@
 chmod +x build.sh
+
+git add .
+git commit -m "fix: 修复度分秒(DMS)转换时的浮点数精度截断Bug，增加秒/分进位处理"
+git push origin main
+
+
+gh release create v1.0.1 app/build/outputs/apk/release/app-release.apk -t "hdm 测量神器 v1.0.1 (修复度分秒Bug)" -n "### 🛠️ 更新说明
+- 修复了度分秒（DDD.MMSS）转换时，由于浮点数精度导致的秒数被截断问题（例如 30.29 被解析为 30度28分100秒）。
+- 优化了反算时的进位逻辑，防止出现 60秒或 60分的情况。"
+

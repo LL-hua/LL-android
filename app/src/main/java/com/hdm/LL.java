@@ -20,71 +20,71 @@ public class LL {
     }
 
 /// 度分秒（DDD.MMSS）→ 弧度 (修复精度丢失Bug)
-public static double hua_DmsToRadians(double dms) {
-    // 保留正负号，因为测量方位角有时会有负数
-    int sign = dms >= 0 ? 1 : -1;
-    dms = Math.abs(dms);
+    public static double hua_DmsToRadians(double dms) {
+        // 保留正负号，因为测量方位角有时会有负数
+        int sign = dms >= 0 ? 1 : -1;
+        dms = Math.abs(dms);
 
-    // 提取度，并四舍五入去掉浮点误差
-    int degrees = (int) dms;
-    
-    // 剩下的分秒部分
-    double fractional = dms - degrees;
-    double ms = fractional * 100.0;
-    
-    // 核心修复：用 Math.round 对分进行四舍五入，解决 28.99999 变成 28 的问题
-    int minutes = (int) Math.round(ms);
-    
-    // 计算秒
-    double seconds = (ms - minutes) * 100.0;
+        // 提取度，并四舍五入去掉浮点误差
+        int degrees = (int) dms;
 
-    // 如果秒接近60（比如 59.999秒），进1分
-    if (seconds >= 59.9999) {
-        seconds = 0;
-        minutes += 1;
+        // 剩下的分秒部分
+        double fractional = dms - degrees;
+        double ms = fractional * 100.0;
+
+        // 核心修复：用 Math.round 对分进行四舍五入，解决 28.99999 变成 28 的问题
+        int minutes = (int) Math.round(ms);
+
+        // 计算秒
+        double seconds = (ms - minutes) * 100.0;
+
+        // 如果秒接近60（比如 59.999秒），进1分
+        if (seconds >= 59.9999) {
+            seconds = 0;
+            minutes += 1;
+        }
+
+        // 如果分到了60，进1度
+        if (minutes >= 60) {
+            minutes = 0;
+            degrees += 1;
+        }
+
+        // 组合
+        double totalDegrees = degrees + minutes / 60.0 + seconds / 3600.0;
+        return sign * totalDegrees * Math.PI / 180.0;
     }
-
-    // 如果分到了60，进1度
-    if (minutes >= 60) {
-        minutes = 0;
-        degrees += 1;
-    }
-
-    // 组合
-    double totalDegrees = degrees + minutes / 60.0 + seconds / 3600.0;
-    return sign * totalDegrees * Math.PI / 180.0;
-}
 
 /// 弧度 → 度分秒（DDD.MMSS）(修复进位Bug)
-public static double hua_radiansToDMS(double radians) {
-    double degrees = radians * (180 / Math.PI);
-    
-    // 处理负数
-    int sign = degrees >= 0 ? 1 : -1;
-    degrees = Math.abs(degrees);
-    
-    int d = (int) degrees;
-    double remaining = (degrees - d) * 60;
-    int m = (int) remaining;
-    double s = (remaining - m) * 60;
-    
-    // 核心修复：如果秒四舍五入后是60，秒归零，分进一
-    s = Math.round(s * 10.0) / 10.0;
-    if (s >= 60.0) {
-        s = 0.0;
-        m += 1;
+    public static double hua_radiansToDMS(double radians) {
+        double degrees = radians * (180 / Math.PI);
+
+        // 处理负数
+        int sign = degrees >= 0 ? 1 : -1;
+        degrees = Math.abs(degrees);
+
+        int d = (int) degrees;
+        double remaining = (degrees - d) * 60;
+        int m = (int) remaining;
+        double s = (remaining - m) * 60;
+
+        // 核心修复：如果秒四舍五入后是60，秒归零，分进一
+        s = Math.round(s * 10.0) / 10.0;
+        if (s >= 60.0) {
+            s = 0.0;
+            m += 1;
+        }
+        if (m >= 60) {
+            m = 0;
+            d += 1;
+        }
+
+        String mm = m < 10 ? "0" + m : "" + m;
+        String ss = s < 10 ? String.format("0%.1f", s) : String.format("%.1f", s);
+
+        String dfm = d + mm + ss;
+        return sign * (Math.round(Double.parseDouble(dfm)) / 10000.0);
     }
-    if (m >= 60) {
-        m = 0;
-        d += 1;
-    }
-    
-    String mm = m < 10 ? "0" + m : "" + m;
-    String ss = s < 10 ? String.format("0%.1f", s) : String.format("%.1f", s);
-    
-    String dfm = d + mm + ss;
-    return sign * (Math.round(Double.parseDouble(dfm)) / 10000.0);
-}
 
     // ============================================================
     // 2. 方位角 + 距离
@@ -373,7 +373,7 @@ public static double hua_radiansToDMS(double radians) {
 
     /// 沿线路按步长取点
 /// 返回：List<double[]>，每项 = [桩号, X, Y, 方位角]
-    public static java.util.List<double[]> dantiaoxianlu(double[][] pqx, double b, double step) {
+    public static List<double[]> dantiaoxianlu(double[][] pqx, double b, double step) {
         java.util.List<double[]> xys = new java.util.ArrayList<double[]>();
 
         if (pqx == null || pqx.length == 0) return xys;
@@ -824,54 +824,39 @@ public static double hua_radiansToDMS(double radians) {
         return Math.round(result * 1000) / 1000.0;
     }
 
-/// 横坡插值
-    public static double hua_slope(double mileage, double[][] points, int interpType) {
-        if (points == null) throw new IllegalArgumentException("points null");
-        int n = points.length;
-        if (n == 0) throw new IllegalArgumentException("点表不能为空");
-        if (points[0].length < 2) throw new IllegalArgumentException("点表必须两列");
-        for (int i = 1; i < n; i++)
-            if (points[i][0] <= points[i - 1][0])
-                throw new IllegalArgumentException("里程必须严格递增");
+/// 线性插值计算横坡
+    public static double hua_slope(double mileage, double[][] points) {
+        if (points == null || points.length == 0) {
+            throw new IllegalArgumentException("点表为空");
+        }
 
+        int n = points.length;
+
+        // 边界处理：小于起点直接返回起点值，大于终点直接返回终点值
         if (mileage <= points[0][0]) return points[0][1];
         if (mileage >= points[n - 1][0]) return points[n - 1][1];
 
-        if (interpType == 0) {
-            for (int i = 0; i < n - 1; i++) {
-                double k1 = points[i][0], k2 = points[i + 1][0];
-                if (mileage >= k1 && mileage <= k2) {
-                    double s1 = points[i][1], s2 = points[i + 1][1];
-                    if (Math.abs(k2 - k1) < 1e-9) return s1;
-                    double t = (mileage - k1) / (k2 - k1);
-                    return s1 + t * (s2 - s1);
-                }
+        // 二分查找：快速定位 mileage 所在的区间 [left, right]
+        int left = 0, right = n - 1;
+        while (right - left > 1) {
+            int mid = (left + right) >>> 1;
+            if (points[mid][0] <= mileage) {
+                left = mid;
+            } else {
+                right = mid;
             }
-        } else if (interpType == 1) {
-            int i = 0;
-            for (; i < n - 1; i++) if (mileage <= points[i + 1][0]) break;
-            int left, mid, right;
-            if (i + 2 < n) {
-                left = i;
-                mid = i + 1;
-                right = i + 2;
-            } else if (i - 2 >= 0) {
-                left = i - 2;
-                mid = i - 1;
-                right = i;
-            } else return hua_slope(mileage, points, 0);
-
-            double x0 = points[left][0], y0 = points[left][1];
-            double x1 = points[mid][0], y1 = points[mid][1];
-            double x2 = points[right][0], y2 = points[right][1];
-            double x = mileage;
-            return y0 * (x - x1) * (x - x2) / ((x0 - x1) * (x0 - x2))
-                    + y1 * (x - x0) * (x - x2) / ((x1 - x0) * (x1 - x2))
-                    + y2 * (x - x0) * (x - x1) / ((x2 - x0) * (x2 - x1));
-        } else {
-            throw new IllegalArgumentException("不支持的插值类型");
         }
-        return points[0][1];
+
+        // 此时 mileage 一定在 points[left] 和 points[right] 之间
+        double k1 = points[left][0], s1 = points[left][1];
+        double k2 = points[right][0], s2 = points[right][1];
+
+        // 防除零（虽然你之前加了递增校验，但这里兜个底更安全）
+        if (Math.abs(k2 - k1) < 1e-9) return s1;
+
+        // 线性插值公式
+        double t = (mileage - k1) / (k2 - k1);
+        return s1 + t * (s2 - s1);
     }
 
 // ============================================================

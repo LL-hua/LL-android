@@ -3,10 +3,7 @@ package com.hdm;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * 投影 + 四参数转换（0 依赖，Android 兼容）。
- * 方法名保持"原代码风格"。
- */
+/** 投影 + 四参数转换 方法名保持"原代码风格"。 */
 public class Projection {
 
     // ============================================================
@@ -71,7 +68,7 @@ public class Projection {
                 + m5 * Math.pow(l, 5) / Math.pow(p0, 5);
         double y = y0 + 500000;
 
-        return new double[] { x, y, L_center };
+        return new double[]{x, y, L_center};
     }
 
     public static double[] gauss_unproj(double x, double y, double l0) {
@@ -123,7 +120,7 @@ public class Projection {
         double l = n1 * y1 + n3 * Math.pow(y1, 3) + n5 * Math.pow(y1, 5);
         double L = L0 + l / pi * 180;
 
-        return new double[] { L, B };
+        return new double[]{L, B};
     }
 
     // ============================================================
@@ -153,33 +150,33 @@ public class Projection {
 
         double M = EQUATORIAL_RADIUS
                 * ((1 - ECC_SQUARED / 4 - 3 * Math.pow(ECC_SQUARED, 2) / 64
-                        - 5 * Math.pow(ECC_SQUARED, 3) / 256) * latRad
-                - (3 * ECC_SQUARED / 8 + 3 * Math.pow(ECC_SQUARED, 2) / 32
-                        + 45 * Math.pow(ECC_SQUARED, 3) / 1024) * Math.sin(2 * latRad)
-                + (15 * Math.pow(ECC_SQUARED, 2) / 256
-                        + 45 * Math.pow(ECC_SQUARED, 3) / 1024) * Math.sin(4 * latRad)
-                - (35 * Math.pow(ECC_SQUARED, 3) / 3072) * Math.sin(6 * latRad));
+                                        - 5 * Math.pow(ECC_SQUARED, 3) / 256) * latRad
+                        - (3 * ECC_SQUARED / 8 + 3 * Math.pow(ECC_SQUARED, 2) / 32
+                                        + 45 * Math.pow(ECC_SQUARED, 3) / 1024) * Math.sin(2 * latRad)
+                        + (15 * Math.pow(ECC_SQUARED, 2) / 256
+                                        + 45 * Math.pow(ECC_SQUARED, 3) / 1024) * Math.sin(4 * latRad)
+                        - (35 * Math.pow(ECC_SQUARED, 3) / 3072) * Math.sin(6 * latRad));
 
         double easting = SCALE_FACTOR * N * (A
-                + (1 - T + C) * Math.pow(A, 3) / 6
-                + (5 - 18 * T + Math.pow(T, 2) + 72 * C - 58 * ECC_PRIME_SQUARED)
-                        * Math.pow(A, 5) / 120) + FALSE_EASTING;
+                                + (1 - T + C) * Math.pow(A, 3) / 6
+                                + (5 - 18 * T + Math.pow(T, 2) + 72 * C - 58 * ECC_PRIME_SQUARED)
+                                        * Math.pow(A, 5) / 120) + FALSE_EASTING;
 
         double northing = SCALE_FACTOR * (M
-                + N * Math.tan(latRad) * (Math.pow(A, 2) / 2
-                + (5 - T + 9 * C + 4 * Math.pow(C, 2)) * Math.pow(A, 4) / 24
-                + (61 - 58 * T + Math.pow(T, 2) + 600 * C - 330 * ECC_PRIME_SQUARED)
-                        * Math.pow(A, 6) / 720));
+                        + N * Math.tan(latRad) * (Math.pow(A, 2) / 2
+                                        + (5 - T + 9 * C + 4 * Math.pow(C, 2)) * Math.pow(A, 4) / 24
+                                        + (61 - 58 * T + Math.pow(T, 2) + 600 * C - 330 * ECC_PRIME_SQUARED)
+                                                * Math.pow(A, 6) / 720));
 
         if (latitude < 0) {
             northing += FALSE_NORTHING_S;
         }
 
-        return new double[] { northing, easting, zoneNumber };
+        return new double[]{northing, easting, zoneNumber};
     }
 
     public static double[] utm_unproj(double northing, double easting,
-                                      boolean isNorthern, int zoneNumber) {
+            boolean isNorthern, int zoneNumber) {
         double EQUATORIAL_RADIUS = 6378137.0;
         double FLATTENING = 1 / 298.257223563;
         double ECC_SQUARED = 2 * FLATTENING - Math.pow(FLATTENING, 2);
@@ -196,8 +193,8 @@ public class Projection {
 
         double M = y / SCALE_FACTOR;
         double mu = M / (EQUATORIAL_RADIUS * (1 - ECC_SQUARED / 4
-                - 3 * Math.pow(ECC_SQUARED, 2) / 64.0
-                - 5 * Math.pow(ECC_SQUARED, 3) / 256.0));
+                                - 3 * Math.pow(ECC_SQUARED, 2) / 64.0
+                                - 5 * Math.pow(ECC_SQUARED, 3) / 256.0));
 
         double e1 = (1 - Math.sqrt(1 - ECC_SQUARED)) / (1 + Math.sqrt(1 - ECC_SQUARED));
 
@@ -216,22 +213,22 @@ public class Projection {
         double D = x / (N1 * SCALE_FACTOR);
 
         double latRad = phi1Rad - (N1 * Math.tan(phi1Rad) / R1) * (Math.pow(D, 2) / 2
-                - (5 + 3 * T1 + 10 * C1 - 4 * Math.pow(C1, 2)
-                        - 9 * ECC_PRIME_SQUARED) * Math.pow(D, 4) / 24
-                + (61 + 90 * T1 + 298 * C1 + 45 * Math.pow(T1, 2)
-                        - 252 * ECC_PRIME_SQUARED - 3 * Math.pow(C1, 2))
-                        * Math.pow(D, 6) / 720);
+                                - (5 + 3 * T1 + 10 * C1 - 4 * Math.pow(C1, 2)
+                                                - 9 * ECC_PRIME_SQUARED) * Math.pow(D, 4) / 24
+                                + (61 + 90 * T1 + 298 * C1 + 45 * Math.pow(T1, 2)
+                                                - 252 * ECC_PRIME_SQUARED - 3 * Math.pow(C1, 2))
+                                        * Math.pow(D, 6) / 720);
 
         double lonRad = lonCenterRad
                 + (D - (1 + 2 * T1 + C1) * Math.pow(D, 3) / 6
-                + (5 - 2 * C1 + 28 * T1 - 3 * Math.pow(C1, 2)
-                        + 8 * ECC_PRIME_SQUARED + 24 * Math.pow(T1, 2))
-                        * Math.pow(D, 5) / 120) / Math.cos(phi1Rad);
+                                + (5 - 2 * C1 + 28 * T1 - 3 * Math.pow(C1, 2)
+                                                + 8 * ECC_PRIME_SQUARED + 24 * Math.pow(T1, 2))
+                                        * Math.pow(D, 5) / 120) / Math.cos(phi1Rad);
 
         double longitude = lonRad * 180 / Math.PI;
         double latitude = latRad * 180 / Math.PI;
 
-        return new double[] { longitude, latitude };
+        return new double[]{longitude, latitude};
     }
 
     public static int utm_zone(double longitude) {
@@ -245,14 +242,14 @@ public class Projection {
         double x = lon * 20037508.34 / 180;
         double y = Math.log(Math.tan((90 + lat) * Math.PI / 360)) / (Math.PI / 180);
         y = y * 20037508.34 / 180;
-        return new double[] { x, y };
+        return new double[]{x, y};
     }
 
     public static double[] web_unproj(double x, double y) {
         double lon = x / 20037508.34 * 180;
         double lat = 180 / Math.PI
                 * (2 * Math.atan(Math.exp(y / 20037508.34 * Math.PI * 180)) - Math.PI / 2);
-        return new double[] { lon, lat };
+        return new double[]{lon, lat};
     }
 
     // ============================================================
@@ -260,10 +257,10 @@ public class Projection {
     // ============================================================
     public static double[] cs4(double[] source, double[] target) {
         if (source == null || target == null || source.length != target.length) {
-            return new double[] { 0, 0, 0, 1 };
+            return new double[]{0, 0, 0, 1};
         }
         if (source.length < 4 || source.length % 2 != 0) {
-            return new double[] { 0, 0, 0, 1 };
+            return new double[]{0, 0, 0, 1};
         }
 
         int pointCount = source.length / 2;
@@ -311,7 +308,7 @@ public class Projection {
 
         double det = H11 * H22 - H12 * H21;
         if (Math.abs(det) < 1e-15) {
-            return new double[] { 0, 0, 0, 1 };
+            return new double[]{0, 0, 0, 1};
         }
 
         double a = (H22 * B1 - H12 * B2) / det;
@@ -323,32 +320,32 @@ public class Projection {
         double deltaX = meanX2 - (a * meanX1 - b * meanY1);
         double deltaY = meanY2 - (b * meanX1 + a * meanY1);
 
-        return new double[] { deltaX, deltaY, rotation, scale };
+        return new double[]{deltaX, deltaY, rotation, scale};
     }
 
     public static double[] fourParameterTransform(double x, double y,
-                                                  double deltaX, double deltaY,
-                                                  double rotation, double scale) {
+            double deltaX, double deltaY,
+            double rotation, double scale) {
         double convertedX = scale * (x * Math.cos(rotation) - y * Math.sin(rotation)) + deltaX;
         double convertedY = scale * (x * Math.sin(rotation) + y * Math.cos(rotation)) + deltaY;
-        return new double[] { convertedX, convertedY };
+        return new double[]{convertedX, convertedY};
     }
 
     // ============================================================
     // 5. GPS → 当地 XY（组合）
     // ============================================================
     /**
-     * @param lon       经度
-     * @param lat       纬度
-     * @param proj      "gauss" / "utm"
+     * @param lon 经度
+     * @param lat 纬度
+     * @param proj "gauss" / "utm"
      * @param ctrlLonLat 控制点经纬度 N×2
-     * @param ctrlXy     控制点 XY N×2
-     * @param center     中央子午线（高斯用）
-     * @return           [X, Y]
+     * @param ctrlXy 控制点 XY N×2
+     * @param center 中央子午线（高斯用）
+     * @return [X, Y]
      */
     public static double[] gps2Xy(double lon, double lat, String proj,
-                                  double[][] ctrlLonLat, double[][] ctrlXy,
-                                  double center) {
+            double[][] ctrlLonLat, double[][] ctrlXy,
+            double center) {
         String p = proj == null ? "" : proj.toLowerCase();
 
         if (p.contains("gao")) {
@@ -365,7 +362,7 @@ public class Projection {
             double[] cs4 = cs4(sourceXy, targetXy);
             double[] lsxy = gauss_proj(lon, lat, center);
             return fourParameterTransform(lsxy[0], lsxy[1],
-                    cs4[0], cs4[1], cs4[2], cs4[3]);
+            cs4[0], cs4[1], cs4[2], cs4[3]);
         }
 
         if (p.contains("utm")) {
@@ -375,17 +372,17 @@ public class Projection {
             for (int i = 0; i < n; i++) {
                 double[] ls = utm_proj(ctrlLonLat[i][0], ctrlLonLat[i][1]);
                 // utm_proj 返回 [northing, easting, zone]
-                sourceXy[i * 2] = ls[0];       // northing → X
-                sourceXy[i * 2 + 1] = ls[1];   // easting  → Y
+                sourceXy[i * 2] = ls[0]; // northing → X
+                sourceXy[i * 2 + 1] = ls[1]; // easting  → Y
                 targetXy[i * 2] = ctrlXy[i][0];
                 targetXy[i * 2 + 1] = ctrlXy[i][1];
             }
             double[] cs4 = cs4(sourceXy, targetXy);
             double[] lsxy = utm_proj(lon, lat);
             return fourParameterTransform(lsxy[0], lsxy[1],
-                    cs4[0], cs4[1], cs4[2], cs4[3]);
+            cs4[0], cs4[1], cs4[2], cs4[3]);
         }
 
-        return new double[] { 0, 0 };
+        return new double[]{0, 0};
     }
 }

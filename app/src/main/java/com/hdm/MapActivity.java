@@ -1,7 +1,6 @@
 package com.hdm;
 
 import android.Manifest;
-import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.DialogInterface;
 import android.content.Intent;
@@ -21,7 +20,7 @@ import android.widget.Toast;
 
 import java.util.List;
 
-public class MapActivity extends Activity {
+public class MapActivity extends BaseNavActivity {
 
     private MyApp app;
     private TextView tvInfo;
@@ -31,6 +30,12 @@ public class MapActivity extends Activity {
     private LocationListener listener;
 
     private static final int REQ_LOCATION = 200;
+
+    @Override
+    protected String currentTab() { return "map"; }
+
+    @Override
+    protected String pageTitle() { return "线路图"; }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -43,25 +48,23 @@ public class MapActivity extends Activity {
             return;
         }
 
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(20, 20, 20, 20);
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(20), dp(20), dp(20), dp(20));
 
         tvInfo = new TextView(this);
-        tvInfo.setText("项目: " + app.currentProjectName);
-        root.addView(tvInfo);
+        tvInfo.setText("正在加载线路...");
+        content.addView(tvInfo);
 
         FrameLayout chartBox = new FrameLayout(this);
-        LinearLayout.LayoutParams lpBox = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f);
-        chartBox.setLayoutParams(lpBox);
+        chartBox.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
         mapView = new MapView(this);
         mapView.setBackgroundColor(0xFFFFFFFF);
-        FrameLayout.LayoutParams lpView = new FrameLayout.LayoutParams(
+        mapView.setLayoutParams(new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT);
-        mapView.setLayoutParams(lpView);
+                FrameLayout.LayoutParams.MATCH_PARENT));
         chartBox.addView(mapView);
 
         TextView btnReset = new TextView(this);
@@ -80,32 +83,25 @@ public class MapActivity extends Activity {
         btnReset.setLayoutParams(lpReset);
         chartBox.addView(btnReset);
 
-        root.addView(chartBox);
-        setContentView(root);
+        content.addView(chartBox);
+        setContent(content);
 
         btnReset.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    mapView.resetView();
-                }
-            });
+            @Override
+            public void onClick(View v) { mapView.resetView(); }
+        });
 
         loadRoute();
         startGps();
     }
 
-    // ============================================================
-    // 从设置页面回来后，自动重新检查并开启 GPS
-    // ============================================================
     @Override
     protected void onResume() {
         super.onResume();
-        // 如果已经有定位权限，且之前没在监听（说明是刚从没开GPS的设置页退回来）
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-                if (lm != null && listener == null) {
-                    startGps();
-                }
+            if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+                    == PackageManager.PERMISSION_GRANTED) {
+                if (lm != null && listener == null) startGps();
             }
         }
     }
@@ -121,9 +117,9 @@ public class MapActivity extends Activity {
     }
 
     private void startGps() {
-        // 1. 动态权限检查
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+                    != PackageManager.PERMISSION_GRANTED) {
                 tvInfo.setText("正在申请 GPS 权限...");
                 requestPermissions(new String[]{
                         Manifest.permission.ACCESS_FINE_LOCATION,
@@ -134,38 +130,29 @@ public class MapActivity extends Activity {
         }
 
         lm = (LocationManager) getSystemService(LOCATION_SERVICE);
-
-        // 2. 【核心新增】检查手机系统 GPS 开关是否打开
         boolean isGpsEnabled = lm.isProviderEnabled(LocationManager.GPS_PROVIDER);
 
         if (!isGpsEnabled) {
             tvInfo.setText("❌ 手机 GPS 未开启");
-            
-            // 弹窗提示并跳转到设置页
             new AlertDialog.Builder(this)
                     .setTitle("位置服务未开启")
                     .setMessage("为了获取实时桩号和偏距，请打开系统的位置信息（GPS）开关。")
                     .setPositiveButton("去开启", new DialogInterface.OnClickListener() {
                         @Override
                         public void onClick(DialogInterface dialog, int which) {
-                            // 跳转到系统定位设置页
-                            Intent intent = new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS);
-                            startActivity(intent);
+                            startActivity(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS));
                         }
                     })
                     .setNegativeButton("取消", null)
                     .show();
-            return; // 没开 GPS，直接返回
+            return;
         }
 
-        // 3. 权限和开关都OK，开始定位
         tvInfo.setText("等待 GPS 定位...");
 
         listener = new LocationListener() {
             @Override
-            public void onLocationChanged(Location loc) {
-                handleLocation(loc);
-            }
+            public void onLocationChanged(Location loc) { handleLocation(loc); }
             @Override
             public void onStatusChanged(String provider, int status, Bundle extras) {}
             @Override
@@ -223,18 +210,18 @@ public class MapActivity extends Activity {
 
         float acc = loc.hasAccuracy() ? loc.getAccuracy() : 0f;
         mapView.setCurrent(x, y, stationStr, offsetStr, acc);
-        
+
         final String info = "X=" + String.format("%.3f", x)
                 + " Y=" + String.format("%.3f", y)
                 + " Z=" + String.format("%.3f", loc.getAltitude())
                 + "\n精度: ±" + String.format("%.1f", acc) + " m";
 
         runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    tvInfo.setText(info + "\n" + stationStr + "  " + offsetStr);
-                }
-            });
+            @Override
+            public void run() {
+                tvInfo.setText(info + "\n" + stationStr + "  " + offsetStr);
+            }
+        });
     }
 
     @Override

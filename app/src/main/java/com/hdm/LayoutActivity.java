@@ -1,6 +1,5 @@
 package com.hdm;
 
-import android.app.Activity;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.View;
@@ -14,13 +13,18 @@ import android.widget.Toast;
 import java.util.ArrayList;
 import java.util.List;
 
-public class LayoutActivity extends Activity {
+public class LayoutActivity extends BaseNavActivity {
 
     private MyApp app;
-    private TextView tvInfo;
     private TextView tvResult;
     private EditText etX, etY, etZ;
     private LayoutView sectionView;
+
+    @Override
+    protected String currentTab() { return "layout"; }
+
+    @Override
+    protected String pageTitle() { return "边坡放样"; }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -33,58 +37,51 @@ public class LayoutActivity extends Activity {
             return;
         }
 
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(20, 20, 20, 20);
-
-        tvInfo = new TextView(this);
-        tvInfo.setText("项目: " + app.currentProjectName);
-        root.addView(tvInfo);
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(20), dp(20), dp(20), dp(20));
 
         LinearLayout inputRow = new LinearLayout(this);
         inputRow.setOrientation(LinearLayout.HORIZONTAL);
 
         etX = new EditText(this);
         etX.setHint("X");
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-        0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        etX.setLayoutParams(lp);
+        etX.setLayoutParams(new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         inputRow.addView(etX);
 
         etY = new EditText(this);
         etY.setHint("Y");
-        etY.setLayoutParams(lp);
+        etY.setLayoutParams(new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         inputRow.addView(etY);
 
         etZ = new EditText(this);
         etZ.setHint("Z");
-        etZ.setLayoutParams(lp);
+        etZ.setLayoutParams(new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         inputRow.addView(etZ);
 
         Button btnCalc = new Button(this);
         btnCalc.setText("放样");
         inputRow.addView(btnCalc);
 
-        root.addView(inputRow);
+        content.addView(inputRow);
 
         tvResult = new TextView(this);
         tvResult.setTextSize(14);
         tvResult.setText("输入实测点，点\"放样\"");
-        root.addView(tvResult);
+        content.addView(tvResult);
 
-        // ---- 断面图 ----
         FrameLayout chartBox = new FrameLayout(this);
-        LinearLayout.LayoutParams lpBox = new LinearLayout.LayoutParams(
-        LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f);
-        chartBox.setLayoutParams(lpBox);
+        chartBox.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
         sectionView = new LayoutView(this);
-        //   sectionView.setMode(SectionView.MODE_LAYOUT);
         sectionView.setBackgroundColor(0xFFFFFFFF);
-        FrameLayout.LayoutParams lpView = new FrameLayout.LayoutParams(
-        FrameLayout.LayoutParams.MATCH_PARENT,
-        FrameLayout.LayoutParams.MATCH_PARENT);
-        sectionView.setLayoutParams(lpView);
+        sectionView.setLayoutParams(new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
         chartBox.addView(sectionView);
 
         TextView btnReset = new TextView(this);
@@ -95,23 +92,20 @@ public class LayoutActivity extends Activity {
         btnReset.setPadding(20, 5, 20, 10);
         btnReset.setGravity(Gravity.CENTER);
         FrameLayout.LayoutParams lpReset = new FrameLayout.LayoutParams(
-        FrameLayout.LayoutParams.WRAP_CONTENT,
-        FrameLayout.LayoutParams.WRAP_CONTENT,
-        Gravity.TOP | Gravity.RIGHT);
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP | Gravity.RIGHT);
         lpReset.topMargin = 10;
         lpReset.rightMargin = 10;
         btnReset.setLayoutParams(lpReset);
         chartBox.addView(btnReset);
 
-        root.addView(chartBox);
-
-        setContentView(root);
+        content.addView(chartBox);
+        setContent(content);
 
         btnReset.setOnClickListener(new View.OnClickListener() {
             @Override
-            public void onClick(View v) {
-                sectionView.resetView();
-            }
+            public void onClick(View v) { sectionView.resetView(); }
         });
 
         btnCalc.setOnClickListener(new View.OnClickListener() {
@@ -130,11 +124,7 @@ public class LayoutActivity extends Activity {
         });
     }
 
-    // ============================================================
-    // 放样（纯设计数据，不依赖地面线）
-    // ============================================================
     private void doLayout(double x, double y, double z) {
-        // 1. 反算桩号 + 偏距
         double[] kb = LL.hua_Fs(app.data.pqx, x, y);
         double k = kb[0];
         double b = kb[1];
@@ -144,7 +134,6 @@ public class LayoutActivity extends Activity {
             return;
         }
 
-        // 2. 自己算设计数据（不调 Compute）
         double centerY = LL.hua_H(app.data.sqx, k);
         if (centerY < 0) {
             tvResult.setText("桩号超出竖曲线范围");
@@ -165,7 +154,6 @@ public class LayoutActivity extends Activity {
         double[][] leftSlabs = dao.zuoBanKuai;
         double[][] rightSlabs = dao.youBanKuai;
 
-        // 3. 边坡候选
         BianPoDuanLuo bpCfg = BianPoYinQing.k2BianPo(app.data.slopeData, k);
         if (bpCfg == null) {
             tvResult.setText("边坡段落为空");
@@ -174,7 +162,6 @@ public class LayoutActivity extends Activity {
         BianPoHouXuanBao candidates = BianPoYinQing.getAbsolute(
                 bpCfg, lOuter[0], lOuter[1], rOuter[0], rOuter[1]);
 
-        // 4. 判断左右 + 填挖
         boolean isLeft = b < 0;
         double outerY = isLeft ? lOuter[1] : rOuter[1];
         boolean isFill = z <= outerY;
@@ -186,14 +173,12 @@ public class LayoutActivity extends Activity {
             slope = isFill ? candidates.youTianJueDui : candidates.youWaJueDui;
         }
 
-        // 5. 拼"单侧轮廓"
         List<double[]> outline = new ArrayList<double[]>();
 
         if (isLeft) {
             if (slope != null) {
-                for (int i = 0; i < slope.length; i++) {
+                for (int i = 0; i < slope.length; i++)
                     outline.add(new double[]{slope[i][0], slope[i][1]});
-                }
             }
             outline.add(new double[]{lOuter[0], lOuter[1]});
             double curX = lOuter[0], curY = lOuter[1];
@@ -204,8 +189,7 @@ public class LayoutActivity extends Activity {
                     double nextX = curX + w;
                     double nextY = curY + w * (-sl / 100.0);
                     outline.add(new double[]{nextX, nextY});
-                    curX = nextX;
-                    curY = nextY;
+                    curX = nextX; curY = nextY;
                 }
             }
         } else {
@@ -218,15 +202,13 @@ public class LayoutActivity extends Activity {
                     double nextX = curX + w;
                     double nextY = curY + w * (sl / 100.0);
                     outline.add(new double[]{nextX, nextY});
-                    curX = nextX;
-                    curY = nextY;
+                    curX = nextX; curY = nextY;
                 }
             }
             outline.add(new double[]{rOuter[0], rOuter[1]});
             if (slope != null) {
-                for (int i = 0; i < slope.length; i++) {
+                for (int i = 0; i < slope.length; i++)
                     outline.add(new double[]{slope[i][0], slope[i][1]});
-                }
             }
         }
 
@@ -236,11 +218,9 @@ public class LayoutActivity extends Activity {
             outlineMat[i][1] = outline.get(i)[1];
         }
 
-        // 6. 设计高程
         double designY = LL.FromXgetY(outlineMat, b);
         double verticalMove = z - designY;
 
-        // 7. 水平移动
         double[] xs = LL.FromYgetX(outlineMat, z);
         double horizontalMove = 0;
         boolean hasHorizontal = false;
@@ -250,15 +230,11 @@ public class LayoutActivity extends Activity {
             double minDist = Double.MAX_VALUE;
             for (int i = 0; i < xs.length; i++) {
                 double d = Math.abs(xs[i] - b);
-                if (d < minDist) {
-                    minDist = d;
-                    targetX = xs[i];
-                }
+                if (d < minDist) { minDist = d; targetX = xs[i]; }
             }
             horizontalMove = targetX - b;
         }
 
-        // 8. 输出
         String side = isLeft ? "左" : "右";
         String fillOrCut = isFill ? "填方" : "挖方";
 
@@ -292,7 +268,6 @@ public class LayoutActivity extends Activity {
 
         tvResult.setText(sb.toString());
 
-        // 9. 图
         sectionView.setLayoutData(centerY, lOuter, rOuter, leftSlabs, rightSlabs);
         sectionView.setLayoutSide(isLeft);
         sectionView.setLayoutSlope(slope);
