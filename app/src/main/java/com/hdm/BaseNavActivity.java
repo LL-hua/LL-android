@@ -25,7 +25,6 @@ import java.util.List;
 public abstract class BaseNavActivity extends Activity {
 
     protected static final String[] TAB_KEYS   = {"earth", "layout", "calc", "map", "realmap"};
-    // 这里把“实景地图”改成了“在线地图”
     protected static final String[] TAB_LABELS = {"土方", "放样", "正反算", "平面图", "在线地图"};
     protected static final String[] TAB_ICONS  = {"土", "放", "算", "图", "地"};
 
@@ -276,7 +275,9 @@ public abstract class BaseNavActivity extends Activity {
         if (target == null) return;
 
         MyApp app = (MyApp) getApplication();
-        if (app == null || app.data == null) {
+        
+        // 核心：除了 realmap（在线地图）不需要项目外，其余的 4 个必须选项目
+        if (!"realmap".equals(key) && (app == null || app.data == null)) {
             Toast.makeText(this, "请先点击右上角选择项目", Toast.LENGTH_SHORT).show();
             return;
         }

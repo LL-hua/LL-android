@@ -57,23 +57,20 @@
     <script>
         var map = L.map('map', { zoomControl: false, attributionControl: false }).setView([-4.8, 32.5], 15);
 
-        // 纯正的 512 高清大法，绝对不会有任何冲突和重影
+        // 纯正的 256 原版，你最满意的清晰度
         var googleRoad = L.tileLayer('https://mt1.google.com/vt/lyrs=r&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}', { 
             maxZoom: 20, 
-            tileSize: 256, 
-            
+            tileSize: 256
         });
         
         var googleSatellite = L.tileLayer('https://mt1.google.com/vt/lyrs=y&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}', { 
             maxZoom: 20, 
             tileSize: 256
-           
         });
         
         var openTopo = L.tileLayer('https://a.tile.opentopomap.org/{z}/{x}/{y}.png', { 
             maxZoom: 17, 
             tileSize: 256
-        
         });
 
         googleRoad.addTo(map);
@@ -91,6 +88,14 @@
         var lastGpsLatLng = null;
 
         window.drawRoute = function(dataArray) {
+            // 核心安全判断：如果没有数据，直接清空并返回
+            if (!dataArray || dataArray.length === 0) {
+                if (routeLayer) map.removeLayer(routeLayer);
+                currentData = [];
+                drawLabels();
+                return;
+            }
+
             currentData = dataArray;
             if (routeLayer) map.removeLayer(routeLayer);
             
@@ -160,9 +165,14 @@
             var latlng = [lat, lon];
             lastGpsLatLng = latlng;
             
-            document.getElementById('info-panel').style.display = 'block';
-            document.getElementById('gps-k').innerText = kStr;
-            document.getElementById('gps-b').innerText = bStr;
+            // 核心改动：如果是“未选项目”，不显示信息框
+            if (kStr === "未选项目") {
+                document.getElementById('info-panel').style.display = 'none';
+            } else {
+                document.getElementById('info-panel').style.display = 'block';
+                document.getElementById('gps-k').innerText = kStr;
+                document.getElementById('gps-b').innerText = bStr;
+            }
 
             var gpsIcon = L.divIcon({ className: 'gps-marker', iconSize: [20, 20], iconAnchor: [10, 10] });
 

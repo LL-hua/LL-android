@@ -36,7 +36,7 @@ public class RealMapActivity extends BaseNavActivity {
     protected String currentTab() { return "realmap"; }
 
     @Override
-    protected String pageTitle() { return "实景地图"; }
+    protected String pageTitle() { return "在线地图"; }
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -66,16 +66,8 @@ public class RealMapActivity extends BaseNavActivity {
 
     private void initUI() {
         content.removeAllViews();
-        if (app.data == null) {
-            TextView tvEmpty = new TextView(this);
-            tvEmpty.setText("请点击右上角选择项目文件");
-            tvEmpty.setTextSize(16);
-            tvEmpty.setGravity(Gravity.CENTER);
-            content.addView(tvEmpty, new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT));
-            return;
-        }
 
+        // 无论有没有项目，都直接加载地图！
         FrameLayout mapBox = new FrameLayout(this);
         mapBox.setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT));
 
@@ -86,7 +78,6 @@ public class RealMapActivity extends BaseNavActivity {
         settings.setAllowFileAccessFromFileURLs(true);
         settings.setAllowUniversalAccessFromFileURLs(true);
 
-        // 初始化瓦片数据库
         LocalTileProvider.init(this);
 
         webView.setWebViewClient(new WebViewClient() {
@@ -116,9 +107,6 @@ public class RealMapActivity extends BaseNavActivity {
         webView.loadUrl("file:///android_asset/map.html");
         mapBox.addView(webView, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
-        // ==========================================
-        // 右下角悬浮定位按钮 (小房子 ⌂)
-        // ==========================================
         TextView btnLocate = new TextView(this);
         btnLocate.setText("⌂");
         btnLocate.setTextSize(32);
@@ -146,7 +134,13 @@ public class RealMapActivity extends BaseNavActivity {
     }
 
     private void sendRouteToJs() {
-        if (webView == null || app.data == null) return;
+        if (webView == null) return;
+        
+        // 如果没选项目，直接给网页发个空数组，把红线清空
+        if (app.data == null) {
+            webView.evaluateJavascript("window.drawRoute([]);", null);
+            return;
+        }
 
         try {
             List<double[]> route = LL.dantiaoxianlu(app.data.pqx, 0, 10.0);
@@ -198,8 +192,6 @@ public class RealMapActivity extends BaseNavActivity {
 
             if (validCount > 0) {
                 webView.evaluateJavascript("window.drawRoute(" + jsData.toString() + ");", null);
-            } else {
-                Toast.makeText(this, "有效点数为0", Toast.LENGTH_LONG).show();
             }
 
         } catch (Exception e) {
@@ -227,10 +219,21 @@ public class RealMapActivity extends BaseNavActivity {
     }
 
     private void handleLocation(Location loc) {
-        if (webView == null || app.data == null) return;
+        if (webView == null) return;
         final double lon = loc.getLongitude();
         final double lat = loc.getLatitude();
         final float acc = loc.hasAccuracy() ? loc.getAccuracy() : 0f;
+
+        // 如果没选项目，只传经纬度，桩号传空
+        if (app.data == null) {
+            runOnUiThread(new Runnable() {
+                @Override public void run() {
+                    String js = String.format("window.updateGps(%.8f, %.8f, %.2f, '%s', '%s');", lat, lon, acc, "未选项目", "");
+                    webView.evaluateJavascript(js, null);
+                }
+            });
+            return;
+        }
 
         double[] xy = Projection.gps2Xy(lon, lat, app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
         if (xy == null || xy.length < 2) return;
@@ -256,10 +259,7 @@ public class RealMapActivity extends BaseNavActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        // 修复报错：把 removeListener 改回 removeUpdates
-        if (lm != null && listener != null) { 
-            try { lm.removeUpdates(listener); } catch (Exception e) {} 
-        }
+        if (lm != null && listener != null) { try { lm.removeUpdates(listener); } catch (Exception e) {} }
         if (webView != null) { webView.destroy(); }
     }
 }
