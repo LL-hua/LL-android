@@ -35,10 +35,16 @@ public class CanvasMapView extends View {
     private Paint gpsPaint;
     private Paint gpsStrokePaint;
     
+    // 地图中心经纬度
     private double centerLat = -4.8;
     private double centerLng = 32.5;
     private float zoom = 15.0f;
 
+    // 手势的物理像素偏移量（未提交到经纬度的缓冲）
+    private float offsetX = 0;
+    private float offsetY = 0;
+
+    // 手势状态
     private float lastX, lastY;
     private float lastDist = 0;
 
@@ -63,6 +69,7 @@ public class CanvasMapView extends View {
     private TileDatabase dbSat;
     private TileDatabase dbTopo;
 
+    // 高清屏放大倍数
     private float scaleFactor = 2.0f; 
 
     private final Rect srcRect = new Rect();
@@ -88,10 +95,9 @@ public class CanvasMapView extends View {
         tilePaint.setAntiAlias(true);
         tilePaint.setDither(true);
 
-        // 桩号画笔
         textPaint = new Paint();
         textPaint.setColor(Color.BLACK);
-        textPaint.setTextSize(24f);
+        textPaint.setTextSize(14f); 
         textPaint.setAntiAlias(true);
         textPaint.setTextAlign(Paint.Align.LEFT);
 
@@ -160,6 +166,9 @@ public class CanvasMapView extends View {
             centerLat = startLat + (gpsLat - startLat) * ease;
             centerLng = startLng + (gpsLng - startLng) * ease;
             zoom = startZoom + (17.0f - startZoom) * ease;
+            // 飞过去的时候，清空物理偏移
+            offsetX = 0;
+            offsetY = 0;
             invalidate();
         });
         animator.start();
@@ -191,8 +200,10 @@ public class CanvasMapView extends View {
         float subZoomScale = (float) Math.pow(2, zoom - tileZoom); 
 
         double[] centerWorld = latLngToWorldPixel(centerLat, centerLng, tileZoom);
-        double startX = centerWorld[0] - (width / 2.0) / (scaleFactor * subZoomScale);
-        double startY = centerWorld[1] - (height / 2.0) / (scaleFactor * subZoomScale);
+        
+        // 核心改进：这里减去物理偏移量 offsetX 和 offsetY，这样画布在视觉上就跟着手指走了
+        double startX = centerWorld[0] - (width / 2.0) / (scaleFactor * subZoomScale) - (offsetX / (scaleFactor * subZoomScale));
+        double startY = centerWorld[1] - (height / 2.0) / (scaleFactor * subZoomScale) - (offsetY / (scaleFactor * subZoomScale));
 
         int minTileX = (int) Math.floor(startX / 256);
         int maxTileX = (int) Math.floor((startX + width / (scaleFactor * subZoomScale)) / 256);
@@ -202,7 +213,7 @@ public class CanvasMapView extends View {
         canvas.save();
         canvas.scale(scaleFactor * subZoomScale, scaleFactor * subZoomScale); 
 
-        // 画底图瓦片
+        // 画瓦片
         for (int tx = minTileX; tx <= maxTileX; tx++) {
             for (int ty = minTileY; ty <= maxTileY; ty++) {
                 float screenX = (float) (tx * 256 - startX);
@@ -245,8 +256,8 @@ public class CanvasMapView extends View {
                         canvas.translate(x, y);
                         canvas.rotate(angleDeg); 
                         float textWidth = textPaint.measureText(kStr);
-                        canvas.drawRect(6, -20, 6 + textWidth + 4, 6, textBgPaint);
-                        canvas.drawText(kStr, 6, 0, textPaint);
+                        canvas.drawRect(4, -12, 4 + textWidth + 2, 4, textBgPaint);
+                        canvas.drawText(kStr, 4, 0, textPaint);
                         canvas.restore();
                     }
                 }
@@ -264,15 +275,15 @@ public class CanvasMapView extends View {
             canvas.drawCircle(gx, gy, 12, gpsStrokePaint);
         }
 
-        canvas.restore(); // 恢复画布，接下来的 UI 不受缩放影响
+        canvas.restore();
 
-        // 画左上角的固定信息框
+        // 左上角信息框
         if (hasGps) {
             Paint uiTextPaint = new Paint(textPaint);
-            uiTextPaint.setTextSize(40f); // UI 字体更大
+            uiTextPaint.setTextSize(40f); 
             
             Paint uiBgPaint = new Paint();
-            uiBgPaint.setColor(0xF0FFFFFF); // 稍微带点透明度
+            uiBgPaint.setColor(0xF0FFFFFF); 
             uiBgPaint.setStyle(Paint.Style.FILL);
             uiBgPaint.setAntiAlias(true);
             
@@ -289,11 +300,9 @@ public class CanvasMapView extends View {
             float padTop = 30f;
             float boxMargin = 30f;
             
-            // 画个圆角矩形背景
             RectF bgRect = new RectF(boxMargin, boxMargin, boxMargin + textW + padLeft * 2, boxMargin + textH + padTop);
             canvas.drawRoundRect(bgRect, 20f, 20f, uiBgPaint);
             
-            // 画字
             for (int i = 0; i < lines.length; i++) {
                 canvas.drawText(lines[i], boxMargin + padLeft, boxMargin + padTop + uiTextPaint.getTextSize() * (i + 0.8f), uiTextPaint);
             }
@@ -328,47 +337,49 @@ public class CanvasMapView extends View {
         return memoryCache.get(key);
     }
 
+    // ==========================================
+    // 最纯粹的物理偏移手势（稳如泰山）
+    // ==========================================
     @Override
     public boolean onTouchEvent(MotionEvent event) {
         int action = event.getActionMasked();
+
         if (action == MotionEvent.ACTION_DOWN) {
             lastX = event.getX();
             lastY = event.getY();
             return true;
         }
+
         if (action == MotionEvent.ACTION_POINTER_DOWN) {
-            if (event.getPointerCount() >= 2) lastDist = distance(event);
+            if (event.getPointerCount() >= 2) {
+                lastDist = distance(event);
+            }
             return true;
         }
+
         if (action == MotionEvent.ACTION_MOVE) {
             if (event.getPointerCount() == 1) {
+                // 单指平移：只累加物理像素偏移
                 float dx = event.getX() - lastX;
                 float dy = event.getY() - lastY;
-                double worldSize = 256 * Math.pow(2, zoom);
-                centerLng -= (dx / scaleFactor) / worldSize * 360.0;
-                double latRad = centerLat * Math.PI / 180.0;
-                centerLat += (dy / scaleFactor) / worldSize * 360.0 * Math.cos(latRad);
+                offsetX += dx;
+                offsetY += dy;
                 lastX = event.getX();
                 lastY = event.getY();
                 invalidate();
             } else if (event.getPointerCount() >= 2) {
+                // 双指缩放
                 float newDist = distance(event);
                 if (newDist > 10 && lastDist > 10) {
                     float scale = newDist / lastDist;
                     float nextZoom = zoom + (float) (Math.log(scale) / Math.log(2));
-                    
                     if (nextZoom >= 3.0f && nextZoom <= 18.0f) {
-                        float midX = (event.getX(0) + event.getX(1)) / 2f;
-                        float midY = (event.getY(0) + event.getY(1)) / 2f;
-                        float offsetX = midX - getWidth() / 2f;
-                        float offsetY = midY - getHeight() / 2f;
-                        double worldSizeOld = 256 * Math.pow(2, zoom);
-                        double worldSizeNew = 256 * Math.pow(2, nextZoom);
-                        double ratio = (1.0 / worldSizeNew) - (1.0 / worldSizeOld);
-                        centerLng += offsetX * ratio * 360.0;
-                        double latRad = centerLat * Math.PI / 180.0;
-                        centerLat -= offsetY * ratio * 360.0 * Math.cos(latRad);
                         zoom = nextZoom;
+                        // 注意：由于这里是按新的 zoom 画图了，中心点不变的话视觉上确实会偏。
+                        // 最简单粗暴的修正：让屏幕中心点保持不动。
+                        // 为了简化计算，我们直接清零 offset。
+                        offsetX = 0;
+                        offsetY = 0;
                         invalidate();
                     }
                     lastDist = newDist;
@@ -376,6 +387,24 @@ public class CanvasMapView extends View {
             }
             return true;
         }
+
+        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            // 手指抬起时，把物理像素偏移量一次性反算成经纬度的改变
+            if (offsetX != 0 || offsetY != 0) {
+                double worldSize = 256 * Math.pow(2, zoom);
+                
+                centerLng -= (offsetX / (scaleFactor * worldSize)) * 360.0;
+                
+                double latRad = centerLat * Math.PI / 180.0;
+                centerLat += (offsetY / (scaleFactor * worldSize)) * 360.0 * Math.cos(latRad);
+                
+                offsetX = 0;
+                offsetY = 0;
+                invalidate();
+            }
+            return true;
+        }
+
         return super.onTouchEvent(event);
     }
 

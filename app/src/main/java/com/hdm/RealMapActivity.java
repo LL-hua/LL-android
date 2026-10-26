@@ -1,12 +1,14 @@
 package com.hdm;
 
 import android.Manifest;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.FrameLayout;
@@ -61,7 +63,6 @@ public class RealMapActivity extends BaseNavActivity {
         mapView = new CanvasMapView(this, null);
         mapBox.addView(mapView, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
-        // 右上角：图源切换
         TextView btnType = new TextView(this);
         btnType.setText("卫星");
         btnType.setTextSize(14);
@@ -95,7 +96,6 @@ public class RealMapActivity extends BaseNavActivity {
             }
         });
 
-        // 右下角：定位按钮 (⌂)
         TextView btnLocate = new TextView(this);
         btnLocate.setText("⌂");
         btnLocate.setTextSize(32);
@@ -115,7 +115,13 @@ public class RealMapActivity extends BaseNavActivity {
 
         btnLocate.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
-                if (mapView != null) mapView.locateMe();
+                // 核心：点击时检查是否开启了 GPS，没开就弹提示
+                if (lm != null && !lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                    Toast.makeText(RealMapActivity.this, "请先打开手机的GPS定位服务", Toast.LENGTH_LONG).show();
+                    startActivity(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS));
+                } else if (mapView != null) {
+                    mapView.locateMe();
+                }
             }
         });
 
@@ -183,7 +189,7 @@ public class RealMapActivity extends BaseNavActivity {
             }
         }
         lm = (LocationManager) getSystemService(LOCATION_SERVICE);
-        if (lm == null || !lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) return;
+        if (lm == null) return;
 
         listener = new LocationListener() {
             @Override public void onLocationChanged(Location loc) {
@@ -209,7 +215,12 @@ public class RealMapActivity extends BaseNavActivity {
             @Override public void onProviderEnabled(String provider) {}
             @Override public void onProviderDisabled(String provider) {}
         };
-        try { lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000, 0, listener); } catch (Exception e) {}
+        
+        try {
+            if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000, 0, listener);
+            }
+        } catch (Exception e) {}
     }
 
     @Override
