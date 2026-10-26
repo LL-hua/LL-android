@@ -24,9 +24,9 @@ import java.util.List;
 
 public abstract class BaseNavActivity extends Activity {
 
-    protected static final String[] TAB_KEYS   = {"earth", "layout", "calc", "map", "realmap"};
-    protected static final String[] TAB_LABELS = {"土方", "放样", "正反算", "平面图", "在线地图"};
-    protected static final String[] TAB_ICONS  = {"土", "放", "算", "图", "地"};
+    protected static final String[] TAB_KEYS   = {"earth", "layout", "calc", "realmap"};
+    protected static final String[] TAB_LABELS = {"土方", "放样", "正反算", "在线地图"};
+    protected static final String[] TAB_ICONS  = {"土", "放", "算", "地"};
 
     private static final int COLOR_PRIMARY  = 0xFF1976D2;
     private static final int COLOR_NAV_BG   = 0xFFFFFFFF;
@@ -219,7 +219,7 @@ public abstract class BaseNavActivity extends Activity {
 
         String cur = currentTab();
 
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < 4; i++) {
             final String key = TAB_KEYS[i];
             boolean active = key.equals(cur);
 
@@ -269,14 +269,13 @@ public abstract class BaseNavActivity extends Activity {
         if ("earth".equals(key))   target = EarthworkActivity.class;
         if ("layout".equals(key))  target = LayoutActivity.class;
         if ("calc".equals(key))    target = CalcActivity.class;
-        if ("map".equals(key))     target = MapActivity.class;
         if ("realmap".equals(key)) target = RealMapActivity.class;
         
         if (target == null) return;
 
         MyApp app = (MyApp) getApplication();
         
-        // 核心：除了 realmap（在线地图）不需要项目外，其余的 4 个必须选项目
+        // 除了 realmap，其余必须选项目
         if (!"realmap".equals(key) && (app == null || app.data == null)) {
             Toast.makeText(this, "请先点击右上角选择项目", Toast.LENGTH_SHORT).show();
             return;

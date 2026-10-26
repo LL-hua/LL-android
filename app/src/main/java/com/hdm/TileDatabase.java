@@ -11,36 +11,29 @@ import java.io.File;
 
 public class TileDatabase extends SQLiteOpenHelper {
 
-    private String dbName;
+    // 核心：每个实例自己管自己的数据库连接
+    private SQLiteDatabase myDb = null;
 
-    public TileDatabase(Context context, String dbName) {
-        super(context, getDbPath(dbName), null, 1);
-        this.dbName = dbName;
+    public TileDatabase(Context context, String name) {
+        super(context, getDbPath(name), null, 1);
     }
 
-    private static String getDbPath(String dbName) {
+    private static String getDbPath(String name) {
         File sd = Environment.getExternalStorageDirectory();
         File dir = new File(sd, "1hdm");
         if (!dir.exists()) dir.mkdirs();
-        return new File(dir, dbName).getAbsolutePath();
+        return new File(dir, name).getAbsolutePath();
     }
 
     @Override
     public void onCreate(SQLiteDatabase db) {
-        // 严格遵循 MBTiles 1.3 规范
         db.execSQL("CREATE TABLE metadata (name TEXT, value TEXT);");
         db.execSQL("CREATE TABLE tiles (zoom_level INTEGER, tile_column INTEGER, tile_row INTEGER, tile_data BLOB);");
         db.execSQL("CREATE UNIQUE INDEX tile_index ON tiles (zoom_level, tile_column, tile_row);");
 
-        // 写入标准的元数据（QGIS 等软件读取的关键）
         ContentValues values = new ContentValues();
         values.put("name", "format");
         values.put("value", "png");
-        db.insert("metadata", null, values);
-        
-        values.clear();
-        values.put("name", "type");
-        values.put("value", "baselayer");
         db.insert("metadata", null, values);
     }
 
@@ -51,34 +44,48 @@ public class TileDatabase extends SQLiteOpenHelper {
         onCreate(db);
     }
 
-    // 保存瓦片（标准的 TMS Y轴翻转）
-    public void saveTile(int z, int x, int y, byte[] data) {
-        int tmsY = (1 << z) - 1 - y; 
-        SQLiteDatabase db = this.getWritableDatabase();
-        ContentValues values = new ContentValues();
-        values.put("zoom_level", z);
-        values.put("tile_column", x);
-        values.put("tile_row", tmsY);
-        values.put("tile_data", data);
-        db.insertWithOnConflict("tiles", null, values, SQLiteDatabase.CONFLICT_REPLACE);
-        db.close();
+    private SQLiteDatabase getDb() {
+        if (myDb == null || !myDb.isOpen()) {
+            myDb = this.getWritableDatabase();
+        }
+        return myDb;
     }
 
-    // 读取瓦片
-    public byte[] getTile(int z, int x, int y) {
-        int tmsY = (1 << z) - 1 - y;
-        SQLiteDatabase db = this.getReadableDatabase();
-        Cursor cursor = db.query("tiles", new String[]{"tile_data"},
-                "zoom_level = ? AND tile_column = ? AND tile_row = ?",
-                new String[]{String.valueOf(z), String.valueOf(x), String.valueOf(tmsY)},
-                null, null, null);
-
-        byte[] data = null;
-        if (cursor != null && cursor.moveToFirst()) {
-            data = cursor.getBlob(0);
-            cursor.close();
+    public synchronized void saveTile(int z, int x, int y, byte[] data) {
+        int tmsY = (1 << z) - 1 - y; 
+        try {
+            SQLiteDatabase db = getDb();
+            ContentValues values = new ContentValues();
+            values.put("zoom_level", z);
+            values.put("tile_column", x);
+            values.put("tile_row", tmsY);
+            values.put("tile_data", data);
+            db.insertWithOnConflict("tiles", null, values, SQLiteDatabase.CONFLICT_REPLACE);
+        } catch (Exception e) {
+            e.printStackTrace();
         }
-        db.close();
+    }
+
+    public synchronized byte[] getTile(int z, int x, int y) {
+        int tmsY = (1 << z) - 1 - y;
+        byte[] data = null;
+        Cursor cursor = null;
+        try {
+            SQLiteDatabase db = getDb();
+            cursor = db.query("tiles", new String[]{"tile_data"},
+                    "zoom_level = ? AND tile_column = ? AND tile_row = ?",
+                    new String[]{String.valueOf(z), String.valueOf(x), String.valueOf(tmsY)},
+                    null, null, null);
+            if (cursor != null && cursor.moveToFirst()) {
+                data = cursor.getBlob(0);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            if (cursor != null) {
+                cursor.close();
+            }
+        }
         return data;
     }
 }

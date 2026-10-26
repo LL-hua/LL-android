@@ -17,7 +17,6 @@
         android:usesCleartextTraffic="true"
         android:theme="@android:style/Theme.Light.NoTitleBar">
         
-        <!-- 启动页直接设为 EarthworkActivity -->
         <activity android:name=".EarthworkActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -27,7 +26,6 @@
         
         <activity android:name=".CalcActivity" android:exported="false" />
         <activity android:name=".LayoutActivity" android:exported="false" />
-        <activity android:name=".MapActivity" android:exported="false" />
         <activity android:name=".RealMapActivity" android:exported="false" />
     </application>
 </manifest>

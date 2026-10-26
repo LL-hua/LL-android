@@ -1,7 +1,6 @@
 package com.hdm;
 
 import android.Manifest;
-import android.annotation.SuppressLint;
 import android.content.pm.PackageManager;
 import android.location.Location;
 import android.location.LocationListener;
@@ -10,22 +9,18 @@ import android.os.Build;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.View;
-import android.webkit.WebResourceRequest;
-import android.webkit.WebResourceResponse;
-import android.webkit.WebSettings;
-import android.webkit.WebView;
-import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public class RealMapActivity extends BaseNavActivity {
 
     private MyApp app;
-    private WebView webView;
+    private CanvasMapView mapView;
     private LinearLayout content;
 
     private LocationManager lm;
@@ -38,7 +33,6 @@ public class RealMapActivity extends BaseNavActivity {
     @Override
     protected String pageTitle() { return "在线地图"; }
 
-    @SuppressLint("SetJavaScriptEnabled")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -53,12 +47,6 @@ public class RealMapActivity extends BaseNavActivity {
     }
 
     @Override
-    protected void onResume() {
-        super.onResume();
-        if (lm != null && listener == null) startGps();
-    }
-
-    @Override
     protected void onProjectLoaded() {
         initUI();
         if (lm != null && listener == null) startGps();
@@ -67,46 +55,47 @@ public class RealMapActivity extends BaseNavActivity {
     private void initUI() {
         content.removeAllViews();
 
-        // 无论有没有项目，都直接加载地图！
         FrameLayout mapBox = new FrameLayout(this);
         mapBox.setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT));
 
-        webView = new WebView(this);
-        WebSettings settings = webView.getSettings();
-        settings.setJavaScriptEnabled(true);
-        settings.setDomStorageEnabled(true);
-        settings.setAllowFileAccessFromFileURLs(true);
-        settings.setAllowUniversalAccessFromFileURLs(true);
+        mapView = new CanvasMapView(this, null);
+        mapBox.addView(mapView, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
-        LocalTileProvider.init(this);
+        // 右上角：图源切换
+        TextView btnType = new TextView(this);
+        btnType.setText("卫星");
+        btnType.setTextSize(14);
+        btnType.setTextColor(0xFF0078D4);
+        btnType.setBackgroundColor(0xEEFFFFFF);
+        btnType.setPadding(dp(16), dp(8), dp(16), dp(8));
+        btnType.setGravity(Gravity.CENTER);
+        FrameLayout.LayoutParams lpType = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP | Gravity.RIGHT);
+        lpType.topMargin = dp(16);
+        lpType.rightMargin = dp(16);
+        btnType.setLayoutParams(lpType);
+        mapBox.addView(btnType);
 
-        webView.setWebViewClient(new WebViewClient() {
-            @Override
-            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-                String url = request.getUrl().toString();
-                WebResourceResponse res = LocalTileProvider.interceptTile(url);
-                if (res != null) return res;
-                return super.shouldInterceptRequest(view, request);
-            }
-
-            @SuppressWarnings("deprecation")
-            @Override
-            public WebResourceResponse shouldInterceptRequest(WebView view, String url) {
-                WebResourceResponse res = LocalTileProvider.interceptTile(url);
-                if (res != null) return res;
-                return super.shouldInterceptRequest(view, url);
-            }
-
-            @Override
-            public void onPageFinished(WebView view, String url) {
-                super.onPageFinished(view, url);
-                sendRouteToJs();
+        btnType.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (mapView != null) {
+                    String txt = btnType.getText().toString();
+                    if (txt.equals("卫星")) {
+                        mapView.setMapType(CanvasMapView.MAP_SATELLITE);
+                        btnType.setText("地形");
+                    } else if (txt.equals("地形")) {
+                        mapView.setMapType(CanvasMapView.MAP_TOPO);
+                        btnType.setText("路网");
+                    } else {
+                        mapView.setMapType(CanvasMapView.MAP_ROAD);
+                        btnType.setText("卫星");
+                    }
+                }
             }
         });
-        
-        webView.loadUrl("file:///android_asset/map.html");
-        mapBox.addView(webView, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
+        // 右下角：定位按钮 (⌂)
         TextView btnLocate = new TextView(this);
         btnLocate.setText("⌂");
         btnLocate.setTextSize(32);
@@ -126,28 +115,25 @@ public class RealMapActivity extends BaseNavActivity {
 
         btnLocate.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
-                webView.evaluateJavascript("window.locateMe();", null);
+                if (mapView != null) mapView.locateMe();
             }
         });
 
         content.addView(mapBox);
+
+        if (app.data != null) {
+            loadRouteToMap();
+        }
     }
 
-    private void sendRouteToJs() {
-        if (webView == null) return;
-        
-        // 如果没选项目，直接给网页发个空数组，把红线清空
-        if (app.data == null) {
-            webView.evaluateJavascript("window.drawRoute([]);", null);
-            return;
-        }
-
+    private void loadRouteToMap() {
+        if (mapView == null) return;
         try {
             List<double[]> route = LL.dantiaoxianlu(app.data.pqx, 0, 10.0);
+            List<Object[]> mapData = new ArrayList<>();
             
             double[][] lonlat = app.data.controlLonLat;
             double[][] xy = app.data.controlXy;
-            
             if (lonlat == null || xy == null || lonlat.length == 0 || lonlat.length != xy.length) return;
 
             double[] sourceXY = new double[lonlat.length * 2];
@@ -170,9 +156,6 @@ public class RealMapActivity extends BaseNavActivity {
             int zone = (int) Math.floor((center + 180) / 6) + 1;
             boolean north = lonlat[0][1] >= 0;
 
-            StringBuilder jsData = new StringBuilder("[");
-            int validCount = 0;
-
             for (int i = 0; i < route.size(); i++) {
                 double[] pt = route.get(i);
                 double[] lsxy = Projection.fourParameterTransform(pt[1], pt[2], cs4[0], cs4[1], cs4[2], cs4[3]);
@@ -183,17 +166,10 @@ public class RealMapActivity extends BaseNavActivity {
 
                 if (Double.isNaN(lon) || Double.isNaN(lat) || lon == 0.0) continue;
 
-                if (validCount > 0) jsData.append(",");
                 String kStr = LL.hua_Num2K(pt[0]);
-                jsData.append(String.format("[%.8f,%.8f,\"%s\",%.4f]", lat, lon, kStr, pt[3]));
-                validCount++;
+                mapData.add(new Object[]{lat, lon, kStr, pt[3]});
             }
-            jsData.append("]");
-
-            if (validCount > 0) {
-                webView.evaluateJavascript("window.drawRoute(" + jsData.toString() + ");", null);
-            }
-
+            mapView.setRouteData(mapData);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -210,44 +186,30 @@ public class RealMapActivity extends BaseNavActivity {
         if (lm == null || !lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) return;
 
         listener = new LocationListener() {
-            @Override public void onLocationChanged(Location loc) { handleLocation(loc); }
+            @Override public void onLocationChanged(Location loc) {
+                final double lon = loc.getLongitude();
+                final double lat = loc.getLatitude();
+
+                runOnUiThread(() -> {
+                    if (app.data == null) {
+                        mapView.updateGps(lat, lon, "未选项目", "");
+                        return;
+                    }
+                    double[] xy = Projection.gps2Xy(lon, lat, app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
+                    if (xy == null || xy.length < 2) return;
+
+                    double[] kb = LL.hua_Fs(app.data.pqx, xy[0], xy[1]);
+                    String stationStr = kb[0] < 0 ? "超出范围" : LL.hua_Num2K(kb[0]);
+                    String offsetStr = kb[0] < 0 ? "--" : String.format("%.3f m (%s)", Math.abs(kb[1]), kb[1] < 0 ? "左" : "右");
+                    
+                    mapView.updateGps(lat, lon, stationStr, offsetStr);
+                });
+            }
             @Override public void onStatusChanged(String provider, int status, Bundle extras) {}
             @Override public void onProviderEnabled(String provider) {}
             @Override public void onProviderDisabled(String provider) {}
         };
         try { lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000, 0, listener); } catch (Exception e) {}
-    }
-
-    private void handleLocation(Location loc) {
-        if (webView == null) return;
-        final double lon = loc.getLongitude();
-        final double lat = loc.getLatitude();
-        final float acc = loc.hasAccuracy() ? loc.getAccuracy() : 0f;
-
-        // 如果没选项目，只传经纬度，桩号传空
-        if (app.data == null) {
-            runOnUiThread(new Runnable() {
-                @Override public void run() {
-                    String js = String.format("window.updateGps(%.8f, %.8f, %.2f, '%s', '%s');", lat, lon, acc, "未选项目", "");
-                    webView.evaluateJavascript(js, null);
-                }
-            });
-            return;
-        }
-
-        double[] xy = Projection.gps2Xy(lon, lat, app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
-        if (xy == null || xy.length < 2) return;
-
-        double[] kb = LL.hua_Fs(app.data.pqx, xy[0], xy[1]);
-        final String stationStr = kb[0] < 0 ? "超出范围" : LL.hua_Num2K(kb[0]);
-        final String offsetStr = kb[0] < 0 ? "--" : String.format("%.3f m (%s)", Math.abs(kb[1]), kb[1] < 0 ? "左" : "右");
-
-        runOnUiThread(new Runnable() {
-            @Override public void run() {
-                String js = String.format("window.updateGps(%.8f, %.8f, %.2f, '%s', '%s');", lat, lon, acc, stationStr, offsetStr);
-                webView.evaluateJavascript(js, null);
-            }
-        });
     }
 
     @Override
@@ -260,6 +222,5 @@ public class RealMapActivity extends BaseNavActivity {
     protected void onDestroy() {
         super.onDestroy();
         if (lm != null && listener != null) { try { lm.removeUpdates(listener); } catch (Exception e) {} }
-        if (webView != null) { webView.destroy(); }
     }
 }
