@@ -24,6 +24,7 @@ import java.util.List;
 
 public abstract class BaseNavActivity extends Activity {
 
+    // 核心：删掉"平面图"，只留 4 个
     protected static final String[] TAB_KEYS   = {"earth", "layout", "calc", "realmap"};
     protected static final String[] TAB_LABELS = {"土方", "放样", "正反算", "在线地图"};
     protected static final String[] TAB_ICONS  = {"土", "放", "算", "地"};

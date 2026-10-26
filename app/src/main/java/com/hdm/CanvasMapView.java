@@ -35,16 +35,10 @@ public class CanvasMapView extends View {
     private Paint gpsPaint;
     private Paint gpsStrokePaint;
     
-    // 地图中心经纬度
     private double centerLat = -4.8;
     private double centerLng = 32.5;
     private float zoom = 15.0f;
 
-    // 手势的物理像素偏移量（未提交到经纬度的缓冲）
-    private float offsetX = 0;
-    private float offsetY = 0;
-
-    // 手势状态
     private float lastX, lastY;
     private float lastDist = 0;
 
@@ -53,7 +47,8 @@ public class CanvasMapView extends View {
     public static final int MAP_TOPO = 2;
     private int currentMapType = MAP_ROAD;
 
-    private List<Object[]> routeData;
+    private List<List<Object[]>> multiRoadData; 
+    private int currentRoadIndex = 0;
     
     private double gpsLat = 0, gpsLng = 0;
     private String gpsKStr = "--";
@@ -69,11 +64,12 @@ public class CanvasMapView extends View {
     private TileDatabase dbSat;
     private TileDatabase dbTopo;
 
-    // 高清屏放大倍数
     private float scaleFactor = 2.0f; 
 
     private final Rect srcRect = new Rect();
     private final RectF dstRect = new RectF();
+
+    private ValueAnimator moveAnimator;
 
     public CanvasMapView(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -82,8 +78,6 @@ public class CanvasMapView extends View {
 
     private void init() {
         linePaint = new Paint();
-        linePaint.setColor(Color.RED);
-        linePaint.setStrokeWidth(8f);
         linePaint.setStyle(Paint.Style.STROKE);
         linePaint.setAntiAlias(true);
         
@@ -96,7 +90,6 @@ public class CanvasMapView extends View {
         tilePaint.setDither(true);
 
         textPaint = new Paint();
-        textPaint.setColor(Color.BLACK);
         textPaint.setTextSize(14f); 
         textPaint.setAntiAlias(true);
         textPaint.setTextAlign(Paint.Align.LEFT);
@@ -136,9 +129,111 @@ public class CanvasMapView extends View {
         invalidate();
     }
 
-    public void setRouteData(List<Object[]> route) {
-        this.routeData = route;
-        invalidate();
+    public void setMultiRouteData(List<List<Object[]>> multiData) {
+        this.multiRoadData = multiData;
+        if (multiData != null && !multiData.isEmpty()) {
+            switchRoad(0);
+        }
+    }
+
+    public void switchRoad(int index) {
+        this.currentRoadIndex = index;
+        if (multiRoadData != null && index < multiRoadData.size()) {
+            fitToRoute(multiRoadData.get(index));
+        } else {
+            invalidate();
+        }
+    }
+
+    public void zoomToFitAll() {
+        if (multiRoadData == null || multiRoadData.isEmpty()) return;
+        
+        double minLat = Double.MAX_VALUE, maxLat = -Double.MAX_VALUE;
+        double minLng = Double.MAX_VALUE, maxLng = -Double.MAX_VALUE;
+        boolean hasData = false;
+
+        for (List<Object[]> route : multiRoadData) {
+            for (Object[] pt : route) {
+                double lat = (Double) pt[0];
+                double lng = (Double) pt[1];
+                if (lat < minLat) minLat = lat;
+                if (lat > maxLat) maxLat = lat;
+                if (lng < minLng) minLng = lng;
+                if (lng > maxLng) maxLng = lng;
+                hasData = true;
+            }
+        }
+
+        if (hasData) {
+            animateToBounds(minLat, maxLat, minLng, maxLng);
+        }
+    }
+
+    private void fitToRoute(List<Object[]> route) {
+        if (route == null || route.isEmpty()) {
+            invalidate();
+            return;
+        }
+
+        double minLat = Double.MAX_VALUE, maxLat = -Double.MAX_VALUE;
+        double minLng = Double.MAX_VALUE, maxLng = -Double.MAX_VALUE;
+
+        for (Object[] pt : route) {
+            double lat = (Double) pt[0];
+            double lng = (Double) pt[1];
+            if (lat < minLat) minLat = lat;
+            if (lat > maxLat) maxLat = lat;
+            if (lng < minLng) minLng = lng;
+            if (lng > maxLng) maxLng = lng;
+        }
+
+        animateToBounds(minLat, maxLat, minLng, maxLng);
+    }
+
+    private void animateToBounds(double minLat, double maxLat, double minLng, double maxLng) {
+        double centerLatTarget = (minLat + maxLat) / 2.0;
+        double centerLngTarget = (minLng + maxLng) / 2.0;
+
+        float calculatedZoom = 15.0f;
+        if (maxLat > minLat && maxLng > minLng) {
+            int tileZoom = 15;
+            double[] p1 = latLngToWorldPixel(maxLat, minLng, tileZoom);
+            double[] p2 = latLngToWorldPixel(minLat, maxLng, tileZoom);
+            double w = Math.abs(p2[0] - p1[0]);
+            double h = Math.abs(p2[1] - p1[1]);
+
+            // 第一次的自适应边距
+            double pixelW = getWidth() * 0.8;
+            double pixelH = getHeight() * 0.8;
+
+            float scaleX = (float) (pixelW / w);
+            float scaleY = (float) (pixelH / h);
+            float scale = Math.min(scaleX, scaleY);
+
+            calculatedZoom = (float) (tileZoom + Math.log(scale) / Math.log(2));
+            if (calculatedZoom < 3.0f) calculatedZoom = 3.0f;
+            if (calculatedZoom > 18.0f) calculatedZoom = 18.0f;
+        }
+
+        final float targetZoom = calculatedZoom; 
+
+        final double startLat = centerLat;
+        final double startLng = centerLng;
+        final float startZoom = zoom;
+
+        if (moveAnimator != null) moveAnimator.cancel();
+        moveAnimator = ValueAnimator.ofFloat(0f, 1f);
+        moveAnimator.setDuration(600);
+        moveAnimator.addUpdateListener(animation -> {
+            float t = animation.getAnimatedFraction();
+            float ease = 1 - (1 - t) * (1 - t);
+            
+            centerLat = startLat + (centerLatTarget - startLat) * ease;
+            centerLng = startLng + (centerLngTarget - startLng) * ease;
+            zoom = startZoom + (targetZoom - startZoom) * ease;
+            invalidate();
+        });
+        moveAnimator.start();
     }
 
     public void updateGps(double lat, double lng, String kStr, String bStr) {
@@ -157,21 +252,19 @@ public class CanvasMapView extends View {
         final double startLng = centerLng;
         final float startZoom = zoom;
         
-        ValueAnimator animator = ValueAnimator.ofFloat(0f, 1f);
-        animator.setDuration(600);
-        animator.addUpdateListener(animation -> {
+        if (moveAnimator != null) moveAnimator.cancel();
+        moveAnimator = ValueAnimator.ofFloat(0f, 1f);
+        moveAnimator.setDuration(600);
+        moveAnimator.addUpdateListener(animation -> {
             float t = animation.getAnimatedFraction();
             float ease = 1 - (1 - t) * (1 - t); 
             
             centerLat = startLat + (gpsLat - startLat) * ease;
             centerLng = startLng + (gpsLng - startLng) * ease;
             zoom = startZoom + (17.0f - startZoom) * ease;
-            // 飞过去的时候，清空物理偏移
-            offsetX = 0;
-            offsetY = 0;
             invalidate();
         });
-        animator.start();
+        moveAnimator.start();
     }
 
     private TileDatabase getCurrentDb() {
@@ -200,10 +293,8 @@ public class CanvasMapView extends View {
         float subZoomScale = (float) Math.pow(2, zoom - tileZoom); 
 
         double[] centerWorld = latLngToWorldPixel(centerLat, centerLng, tileZoom);
-        
-        // 核心改进：这里减去物理偏移量 offsetX 和 offsetY，这样画布在视觉上就跟着手指走了
-        double startX = centerWorld[0] - (width / 2.0) / (scaleFactor * subZoomScale) - (offsetX / (scaleFactor * subZoomScale));
-        double startY = centerWorld[1] - (height / 2.0) / (scaleFactor * subZoomScale) - (offsetY / (scaleFactor * subZoomScale));
+        double startX = centerWorld[0] - (width / 2.0) / (scaleFactor * subZoomScale);
+        double startY = centerWorld[1] - (height / 2.0) / (scaleFactor * subZoomScale);
 
         int minTileX = (int) Math.floor(startX / 256);
         int maxTileX = (int) Math.floor((startX + width / (scaleFactor * subZoomScale)) / 256);
@@ -213,7 +304,6 @@ public class CanvasMapView extends View {
         canvas.save();
         canvas.scale(scaleFactor * subZoomScale, scaleFactor * subZoomScale); 
 
-        // 画瓦片
         for (int tx = minTileX; tx <= maxTileX; tx++) {
             for (int ty = minTileY; ty <= maxTileY; ty++) {
                 float screenX = (float) (tx * 256 - startX);
@@ -225,47 +315,68 @@ public class CanvasMapView extends View {
             }
         }
 
-        // 画路线与桩号
-        if (routeData != null && !routeData.isEmpty()) {
-            Path path = new Path();
-            float lastKmPixelX = -99999;
-            float lastKmPixelY = -99999;
+        if (multiRoadData != null && !multiRoadData.isEmpty()) {
+            for (int r = 0; r < multiRoadData.size(); r++) {
+                if (r == currentRoadIndex) continue; 
+                List<Object[]> route = multiRoadData.get(r);
+                if (route == null || route.isEmpty()) continue;
+                Path path = new Path();
+                for (int i = 0; i < route.size(); i++) {
+                    Object[] pt = route.get(i);
+                    double[] worldPx = latLngToWorldPixel((Double) pt[0], (Double) pt[1], tileZoom);
+                    float x = (float) (worldPx[0] - startX);
+                    float y = (float) (worldPx[1] - startY);
+                    if (i == 0) path.moveTo(x, y);
+                    else path.lineTo(x, y);
+                }
+                linePaint.setColor(0xFF888888); 
+                linePaint.setStrokeWidth(4f);
+                canvas.drawPath(path, linePaint);
+            }
 
-            for (int i = 0; i < routeData.size(); i++) {
-                Object[] pt = routeData.get(i);
-                double lat = (Double) pt[0];
-                double lng = (Double) pt[1];
-                String kStr = (String) pt[2];
-                double fwj = (Double) pt[3];
+            List<Object[]> currentRoute = multiRoadData.get(currentRoadIndex);
+            if (currentRoute != null && !currentRoute.isEmpty()) {
+                Path path = new Path();
+                float lastKmPixelX = -99999;
+                float lastKmPixelY = -99999;
 
-                double[] worldPx = latLngToWorldPixel(lat, lng, tileZoom);
-                float x = (float) (worldPx[0] - startX);
-                float y = (float) (worldPx[1] - startY);
+                for (int i = 0; i < currentRoute.size(); i++) {
+                    Object[] pt = currentRoute.get(i);
+                    double lat = (Double) pt[0];
+                    double lng = (Double) pt[1];
+                    String kStr = (String) pt[2];
+                    double fwj = (Double) pt[3];
 
-                if (i == 0) path.moveTo(x, y);
-                else path.lineTo(x, y);
+                    double[] worldPx = latLngToWorldPixel(lat, lng, tileZoom);
+                    float x = (float) (worldPx[0] - startX);
+                    float y = (float) (worldPx[1] - startY);
 
-                if (kStr.endsWith("00")) { 
-                    float dist = (float) Math.sqrt(Math.pow(x - lastKmPixelX, 2) + Math.pow(y - lastKmPixelY, 2));
-                    if (dist > 120) { 
-                        lastKmPixelX = x;
-                        lastKmPixelY = y;
-                        float angleDeg = (float) (fwj * 180 / Math.PI);
+                    if (i == 0) path.moveTo(x, y);
+                    else path.lineTo(x, y);
 
-                        canvas.save();
-                        canvas.translate(x, y);
-                        canvas.rotate(angleDeg); 
-                        float textWidth = textPaint.measureText(kStr);
-                        canvas.drawRect(4, -12, 4 + textWidth + 2, 4, textBgPaint);
-                        canvas.drawText(kStr, 4, 0, textPaint);
-                        canvas.restore();
+                    if (kStr.endsWith("00")) { 
+                        float dist = (float) Math.sqrt(Math.pow(x - lastKmPixelX, 2) + Math.pow(y - lastKmPixelY, 2));
+                        if (dist > 120) { 
+                            lastKmPixelX = x;
+                            lastKmPixelY = y;
+                            float angleDeg = (float) (fwj * 180 / Math.PI);
+
+                            canvas.save();
+                            canvas.translate(x, y);
+                            canvas.rotate(angleDeg); 
+                            float textWidth = textPaint.measureText(kStr);
+                            canvas.drawRect(4, -12, 4 + textWidth + 2, 4, textBgPaint);
+                            canvas.drawText(kStr, 4, 0, textPaint);
+                            canvas.restore();
+                        }
                     }
                 }
+                linePaint.setColor(Color.RED);
+                linePaint.setStrokeWidth(8f);
+                canvas.drawPath(path, linePaint);
             }
-            canvas.drawPath(path, linePaint);
         }
 
-        // 画蓝点
         if (hasGps) {
             double[] gpsWorld = latLngToWorldPixel(gpsLat, gpsLng, tileZoom);
             float gx = (float) (gpsWorld[0] - startX);
@@ -277,7 +388,6 @@ public class CanvasMapView extends View {
 
         canvas.restore();
 
-        // 左上角信息框
         if (hasGps) {
             Paint uiTextPaint = new Paint(textPaint);
             uiTextPaint.setTextSize(40f); 
@@ -337,49 +447,47 @@ public class CanvasMapView extends View {
         return memoryCache.get(key);
     }
 
-    // ==========================================
-    // 最纯粹的物理偏移手势（稳如泰山）
-    // ==========================================
     @Override
     public boolean onTouchEvent(MotionEvent event) {
         int action = event.getActionMasked();
-
         if (action == MotionEvent.ACTION_DOWN) {
             lastX = event.getX();
             lastY = event.getY();
+            if (moveAnimator != null) moveAnimator.cancel();
             return true;
         }
-
         if (action == MotionEvent.ACTION_POINTER_DOWN) {
-            if (event.getPointerCount() >= 2) {
-                lastDist = distance(event);
-            }
+            if (event.getPointerCount() >= 2) lastDist = distance(event);
             return true;
         }
-
         if (action == MotionEvent.ACTION_MOVE) {
             if (event.getPointerCount() == 1) {
-                // 单指平移：只累加物理像素偏移
                 float dx = event.getX() - lastX;
                 float dy = event.getY() - lastY;
-                offsetX += dx;
-                offsetY += dy;
+                double worldSize = 256 * Math.pow(2, zoom);
+                centerLng -= (dx / scaleFactor) / worldSize * 360.0;
+                double latRad = centerLat * Math.PI / 180.0;
+                centerLat += (dy / scaleFactor) / worldSize * 360.0 * Math.cos(latRad);
                 lastX = event.getX();
                 lastY = event.getY();
                 invalidate();
             } else if (event.getPointerCount() >= 2) {
-                // 双指缩放
                 float newDist = distance(event);
                 if (newDist > 10 && lastDist > 10) {
                     float scale = newDist / lastDist;
                     float nextZoom = zoom + (float) (Math.log(scale) / Math.log(2));
                     if (nextZoom >= 3.0f && nextZoom <= 18.0f) {
+                        float midX = (event.getX(0) + event.getX(1)) / 2f;
+                        float midY = (event.getY(0) + event.getY(1)) / 2f;
+                        float offsetX = midX - getWidth() / 2f;
+                        float offsetY = midY - getHeight() / 2f;
+                        double worldSizeOld = 256 * Math.pow(2, zoom);
+                        double worldSizeNew = 256 * Math.pow(2, nextZoom);
+                        double ratio = (1.0 / worldSizeNew) - (1.0 / worldSizeOld);
+                        centerLng += offsetX * ratio * 360.0;
+                        double latRad = centerLat * Math.PI / 180.0;
+                        centerLat -= offsetY * ratio * 360.0 * Math.cos(latRad);
                         zoom = nextZoom;
-                        // 注意：由于这里是按新的 zoom 画图了，中心点不变的话视觉上确实会偏。
-                        // 最简单粗暴的修正：让屏幕中心点保持不动。
-                        // 为了简化计算，我们直接清零 offset。
-                        offsetX = 0;
-                        offsetY = 0;
                         invalidate();
                     }
                     lastDist = newDist;
@@ -387,24 +495,6 @@ public class CanvasMapView extends View {
             }
             return true;
         }
-
-        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-            // 手指抬起时，把物理像素偏移量一次性反算成经纬度的改变
-            if (offsetX != 0 || offsetY != 0) {
-                double worldSize = 256 * Math.pow(2, zoom);
-                
-                centerLng -= (offsetX / (scaleFactor * worldSize)) * 360.0;
-                
-                double latRad = centerLat * Math.PI / 180.0;
-                centerLat += (offsetY / (scaleFactor * worldSize)) * 360.0 * Math.cos(latRad);
-                
-                offsetX = 0;
-                offsetY = 0;
-                invalidate();
-            }
-            return true;
-        }
-
         return super.onTouchEvent(event);
     }
 

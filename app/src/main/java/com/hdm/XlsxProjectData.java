@@ -29,11 +29,13 @@ public class XlsxProjectData {
         data.rightStructures = readRightStructures(xlsx, "右结构层");
         data.leftCrossfalls = readMatrix(xlsx, "左结构层横坡", 2);
         data.rightCrossfalls = readMatrix(xlsx, "右结构层横坡", 2);
-// 坐标系配置
-        readProjectionConfig(xlsx, data);
 
-// 控制点
+        readProjectionConfig(xlsx, data);
         readControlPoints(xlsx, data);
+
+        // 读取“其它线路”表
+        data.extraRoads = readExtraRoads(xlsx, "其它线路");
+
         data.mesh = LL.hua_Fs_Batch(data.pqx, xyz);
 
         data.calculator = new SectionCalculator(
@@ -46,9 +48,6 @@ public class XlsxProjectData {
         return data;
     }
 
-// ============================================================
-// 读"配置"里的"投影方式 / 中央子午线 / 南北半球"
-// ============================================================
     private static void readProjectionConfig(XlsxReader xlsx, ProjectData data) {
         List<Map<Integer, String>> rows = readRows(xlsx, "配置");
         for (int i = 0; i < rows.size(); i++) {
@@ -60,26 +59,16 @@ public class XlsxProjectData {
             if ("投影方式".equals(key)) {
                 data.projection = val.toLowerCase();
             } else if ("中央子午线".equals(key)) {
-                try {
-                    data.lonCenter = Double.parseDouble(val);
-                } catch (Exception e) {
-                }
+                try { data.lonCenter = Double.parseDouble(val); } catch (Exception e) {}
             } else if ("南北半球".equals(key)) {
                 data.isNorthern = val.contains("北");
             }
         }
     }
 
-// ============================================================
-// 读"控制点" sheet
-// 格式：名字, X, Y, Z, 经度, 纬度
-// ============================================================
     private static void readControlPoints(XlsxReader xlsx, ProjectData data) {
         List<Map<Integer, String>> rows;
-        try {
-            rows = readRows(xlsx, "控制点");
-        } catch (Exception e) {
-            // sheet 不存在
+        try { rows = readRows(xlsx, "控制点"); } catch (Exception e) {
             data.controlLonLat = new double[0][2];
             data.controlXy = new double[0][2];
             return;
@@ -91,17 +80,11 @@ public class XlsxProjectData {
         for (int i = 0; i < rows.size(); i++) {
             Map<Integer, String> row = rows.get(i);
             if (isEmptyRow(row)) continue;
-
-            // 第 0 列：名字（忽略）
-            // 第 1、2、3 列：X、Y、Z
-            // 第 4、5 列：经度、纬度
             double x = getDouble(row, 1);
             double y = getDouble(row, 2);
             double lon = getDouble(row, 4);
             double lat = getDouble(row, 5);
-
-            if (x == 0 && y == 0) continue; // 无效行
-
+            if (x == 0 && y == 0) continue;
             xyList.add(new double[]{x, y});
             llList.add(new double[]{lon, lat});
         }
@@ -117,7 +100,83 @@ public class XlsxProjectData {
     }
 
     // ============================================================
-    // 读 sheet
+    // 核心：读取“其它线路”表（完美支持名称为空延续）
+    // 注意：XlsxReader 已经跳过了物理第 1 行，所以这里必须从 0 开始处理
+    // ============================================================
+    private static List<MapRoadData> readExtraRoads(XlsxReader xlsx, String sheetName) {
+        List<MapRoadData> result = new ArrayList<>();
+        List<Map<Integer, String>> rows;
+        try {
+            rows = readRows(xlsx, sheetName);
+        } catch (Exception e) {
+            return result; // 如果 Excel 里没有这个表，直接返回空
+        }
+
+        String currentName = null;
+        List<double[]> currentPqx = new ArrayList<>();
+
+        for (int i = 0; i < rows.size(); i++) {
+            Map<Integer, String> row = rows.get(i);
+            if (isEmptyRow(row)) continue;
+
+            // 判断当前行有没有路名
+            String name = getString(row, 0).trim(); 
+            if (!name.isEmpty()) {
+                // 如果之前有路，先把之前那条路存起来
+                if (currentName != null && !currentPqx.isEmpty()) {
+                    double[][] matrix = new double[currentPqx.size()][8];
+                    for (int j = 0; j < currentPqx.size(); j++) {
+                        matrix[j] = currentPqx.get(j);
+                    }
+                    result.add(new MapRoadData(currentName, matrix));
+                }
+                // 开启新的一条路
+                currentName = name;
+                currentPqx.clear();
+            }
+
+            // 如果 currentName 还是 null，说明连第一行的路名都没读到，直接跳过
+            if (currentName == null) continue;
+
+            // 严格读取 8 列数据（从第 1 列到第 8 列，索引为 1~8），防止越界或读到空数据
+            double[] d = new double[8];
+            boolean valid = true;
+            for (int j = 0; j < 8; j++) {
+                String val = row.get(j + 1);
+                if (val == null || val.trim().isEmpty()) {
+                    valid = false; 
+                    break;
+                }
+                try {
+                    d[j] = Double.parseDouble(val.trim());
+                } catch (Exception e) {
+                    valid = false;
+                    break;
+                }
+            }
+
+            // 只有当这 8 列数据都完整且合法时，才加入
+            if (valid) {
+                // 额外校验：如果桩号是 0 且坐标也是 0，这肯定是个空行或者错误行，跳过
+                if (d[0] == 0 && d[1] == 0 && d[2] == 0) continue;
+                currentPqx.add(d);
+            }
+        }
+
+        // 存最后一条路
+        if (currentName != null && !currentPqx.isEmpty()) {
+            double[][] matrix = new double[currentPqx.size()][8];
+            for (int i = 0; i < currentPqx.size(); i++) {
+                matrix[i] = currentPqx.get(i);
+            }
+            result.add(new MapRoadData(currentName, matrix));
+        }
+
+        return result;
+    }
+
+    // ============================================================
+    // 其它原有解析方法
     // ============================================================
     private static List<Map<Integer, String>> readRows(XlsxReader xlsx, String sheetName) {
         return xlsx.readSheet(sheetName);
@@ -144,13 +203,10 @@ public class XlsxProjectData {
             if (isEmptyRow(row)) continue;
             DuanMianShuJu d = new DuanMianShuJu();
             d.zhuangHao = getDouble(row, 0);
-
-            // Java 7：不用 stream，改成 for
             int maxKey = 0;
             for (Integer k : row.keySet()) {
                 if (k != null && k > maxKey) maxKey = k;
             }
-
             for (int j = 1; j + 1 <= maxKey; j += 2) {
                 if (isCellEmpty(row, j) && isCellEmpty(row, j + 1)) break;
                 d.banKuaiJiHe.add(new double[]{getDouble(row, j), getDouble(row, j + 1)});
@@ -206,8 +262,7 @@ public class XlsxProjectData {
         return m;
     }
 
-    private static List<
-                    LeftJiegoucengConfig> readLeftStructures(XlsxReader xlsx, String sheetName) {
+    private static List<LeftJiegoucengConfig> readLeftStructures(XlsxReader xlsx, String sheetName) {
         List<Map<Integer, String>> rows = readRows(xlsx, sheetName);
         List<LeftJiegoucengConfig> list = new ArrayList<>();
         for (Map<Integer, String> row : rows) {
@@ -227,8 +282,7 @@ public class XlsxProjectData {
         return list;
     }
 
-    private static List<
-                    RightJiegoucengConfig> readRightStructures(XlsxReader xlsx, String sheetName) {
+    private static List<RightJiegoucengConfig> readRightStructures(XlsxReader xlsx, String sheetName) {
         List<Map<Integer, String>> rows = readRows(xlsx, sheetName);
         List<RightJiegoucengConfig> list = new ArrayList<>();
         for (Map<Integer, String> row : rows) {
@@ -256,26 +310,16 @@ public class XlsxProjectData {
             String val = getString(row, 1).trim();
             if (key.isEmpty()) continue;
             if ("ClearDepth".equals(key)) {
-                try {
-                    cfg.clearDepth = Double.parseDouble(val);
-                } catch (Exception e) {
-                }
+                try { cfg.clearDepth = Double.parseDouble(val); } catch (Exception e) {}
             } else if ("XyzRows".equals(key)) {
-                try {
-                    cfg.xyzRows = Integer.parseInt(val);
-                } catch (Exception e) {
-                }
+                try { cfg.xyzRows = Integer.parseInt(val); } catch (Exception e) {}
             } else if ("XyzCols".equals(key)) {
-                try {
-                    cfg.xyzCols = Integer.parseInt(val);
-                } catch (Exception e) {
-                }
+                try { cfg.xyzCols = Integer.parseInt(val); } catch (Exception e) {}
             }
         }
         return cfg;
     }
 
-    // ============================================================
     private static boolean isEmptyRow(Map<Integer, String> row) {
         if (row == null || row.isEmpty()) return true;
         for (String v : row.values())
@@ -291,21 +335,13 @@ public class XlsxProjectData {
     private static double getDouble(Map<Integer, String> row, int idx) {
         String v = row.get(idx);
         if (v == null || v.trim().isEmpty()) return 0;
-        try {
-            return Double.parseDouble(v.trim());
-        } catch (Exception e) {
-            return 0;
-        }
+        try { return Double.parseDouble(v.trim()); } catch (Exception e) { return 0; }
     }
 
     private static Double tryGetDouble(Map<Integer, String> row, int idx) {
         String v = row.get(idx);
         if (v == null || v.trim().isEmpty()) return null;
-        try {
-            return Double.parseDouble(v.trim());
-        } catch (Exception e) {
-            return null;
-        }
+        try { return Double.parseDouble(v.trim()); } catch (Exception e) { return null; }
     }
 
     private static String getString(Map<Integer, String> row, int idx) {
@@ -324,17 +360,17 @@ class ProjectData {
     public List<LeftJiegoucengConfig> leftStructures;
     public List<RightJiegoucengConfig> rightStructures;
     public SectionCalculator calculator;
-// 坐标系 / 控制点（画地图用）
-    public String projection = "gauss"; // "gauss" / "utm"
-    public double lonCenter = 0; // 中央子午线（高斯用，UTM 自动算）
-    public boolean isNorthern = false; // 南北半球
-    public double[][] controlLonLat; // N×2：[经度, 纬度]
-    public double[][] controlXy; // N×2：[X, Y]
 
-    public ComputeResult Query(double station) {
-        return calculator.Compute(station);
-    }
+    public String projection = "gauss"; 
+    public double lonCenter = 0; 
+    public boolean isNorthern = false; 
+    public double[][] controlLonLat; 
+    public double[][] controlXy; 
 
+    // 新增：其它线路
+    public List<MapRoadData> extraRoads = new ArrayList<>();
+
+    public ComputeResult Query(double station) { return calculator.Compute(station); }
     public double[] Stations() {
         double[] arr = new double[kzb.length];
         for (int i = 0; i < kzb.length; i++) arr[i] = kzb[i][0];
@@ -346,7 +382,6 @@ class ProjectData {
 // .xlsx 读取器（ZIP + XML）—— Android 兼容版
 // ============================================================
 class XlsxReader {
-
     private final ZipFile zip;
     private final Map<String, String> sheetNameToPath = new HashMap<String, String>();
     private List<String> sharedStrings = new ArrayList<String>();
@@ -403,9 +438,7 @@ class XlsxReader {
                 }
                 sharedStrings.add(sb.toString());
             }
-        } catch (Exception e) {
-            // sharedStrings 可能不存在
-        }
+        } catch (Exception e) {}
     }
 
     public List<Map<Integer, String>> readSheet(String sheetName) {
@@ -419,7 +452,6 @@ class XlsxReader {
 
             for (int i = 0; i < rowList.getLength(); i++) {
                 Element row = (Element) rowList.item(i);
-
                 String rAttr = row.getAttribute("r");
                 if (rAttr != null && rAttr.equals("1")) continue;
 
@@ -429,7 +461,6 @@ class XlsxReader {
                     Element c = (Element) cellList.item(j);
                     String ref = c.getAttribute("r");
                     String type = c.getAttribute("t");
-
                     int colIdx = colRefToIndex(ref);
                     String val = readCellValue(c, type);
                     if (val != null && !val.isEmpty()) map.put(Integer.valueOf(colIdx), val);
@@ -479,7 +510,6 @@ class XlsxReader {
         return col - 1;
     }
 
-    // ============================================================
     private byte[] readEntry(String path) throws IOException {
         ZipEntry e = zip.getEntry(path);
         if (e == null) throw new IOException("找不到 zip 内文件: " + path);
@@ -499,27 +529,12 @@ class XlsxReader {
         return zip.getEntry(path) != null;
     }
 
-    /// Android 兼容：setFeature 包 try-catch
     private static Document parseXml(byte[] bytes) throws Exception {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         factory.setNamespaceAware(false);
-
-        try {
-            factory.setFeature(
-                    "http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
-        } catch (Exception ignore) {
-        }
-        try {
-            factory.setFeature(
-                    "http://xml.org/sax/features/external-general-entities", false);
-        } catch (Exception ignore) {
-        }
-        try {
-            factory.setFeature(
-                    "http://xml.org/sax/features/external-parameter-entities", false);
-        } catch (Exception ignore) {
-        }
-
+        try { factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false); } catch (Exception ignore) {}
+        try { factory.setFeature("http://xml.org/sax/features/external-general-entities", false); } catch (Exception ignore) {}
+        try { factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false); } catch (Exception ignore) {}
         DocumentBuilder builder = factory.newDocumentBuilder();
         return builder.parse(new ByteArrayInputStream(bytes));
     }

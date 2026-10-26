@@ -11,8 +11,11 @@ import android.os.Bundle;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -24,10 +27,14 @@ public class RealMapActivity extends BaseNavActivity {
     private MyApp app;
     private CanvasMapView mapView;
     private LinearLayout content;
+    private Spinner spRoads;
 
     private LocationManager lm;
     private LocationListener listener;
     private static final int REQ_LOCATION = 200;
+    
+    private List<MapRoadData> allRoadsList = new ArrayList<>();
+    private int currentSelectedRoad = 0;
 
     @Override
     protected String currentTab() { return "realmap"; }
@@ -63,6 +70,28 @@ public class RealMapActivity extends BaseNavActivity {
         mapView = new CanvasMapView(this, null);
         mapBox.addView(mapView, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
+        // 右上角：路线选择下拉框
+        spRoads = new Spinner(this);
+        spRoads.setBackgroundColor(0xEEFFFFFF);
+        FrameLayout.LayoutParams lpSp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP | Gravity.RIGHT);
+        lpSp.topMargin = dp(16);
+        lpSp.rightMargin = dp(16);
+        spRoads.setLayoutParams(lpSp);
+        mapBox.addView(spRoads);
+
+        spRoads.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                currentSelectedRoad = position;
+                if (mapView != null) mapView.switchRoad(position);
+            }
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {}
+        });
+
+        // 右上角：切换图层
         TextView btnType = new TextView(this);
         btnType.setText("卫星");
         btnType.setTextSize(14);
@@ -73,7 +102,7 @@ public class RealMapActivity extends BaseNavActivity {
         FrameLayout.LayoutParams lpType = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP | Gravity.RIGHT);
-        lpType.topMargin = dp(16);
+        lpType.topMargin = dp(60);
         lpType.rightMargin = dp(16);
         btnType.setLayoutParams(lpType);
         mapBox.addView(btnType);
@@ -96,6 +125,31 @@ public class RealMapActivity extends BaseNavActivity {
             }
         });
 
+        // 左下角：缩放全部道路按钮
+        TextView btnFitAll = new TextView(this);
+        btnFitAll.setText("⛶");
+        btnFitAll.setTextSize(24);
+        btnFitAll.setTextColor(0xFF0078D4);
+        btnFitAll.setBackgroundColor(0xEEFFFFFF);
+        btnFitAll.setPadding(dp(10), dp(8), dp(10), dp(8));
+        btnFitAll.setGravity(Gravity.CENTER);
+        
+        FrameLayout.LayoutParams lpFit = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, 
+                FrameLayout.LayoutParams.WRAP_CONTENT, 
+                Gravity.BOTTOM | Gravity.LEFT);
+        lpFit.bottomMargin = dp(30); 
+        lpFit.leftMargin = dp(16);
+        btnFitAll.setLayoutParams(lpFit); 
+        mapBox.addView(btnFitAll);
+
+        btnFitAll.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (mapView != null) mapView.zoomToFitAll();
+            }
+        });
+
+        // 右下角：一键定位
         TextView btnLocate = new TextView(this);
         btnLocate.setText("⌂");
         btnLocate.setTextSize(32);
@@ -115,7 +169,6 @@ public class RealMapActivity extends BaseNavActivity {
 
         btnLocate.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
-                // 核心：点击时检查是否开启了 GPS，没开就弹提示
                 if (lm != null && !lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
                     Toast.makeText(RealMapActivity.this, "请先打开手机的GPS定位服务", Toast.LENGTH_LONG).show();
                     startActivity(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS));
@@ -128,16 +181,24 @@ public class RealMapActivity extends BaseNavActivity {
         content.addView(mapBox);
 
         if (app.data != null) {
-            loadRouteToMap();
+            loadAllRoutes();
         }
     }
 
-    private void loadRouteToMap() {
+    private void loadAllRoutes() {
         if (mapView == null) return;
         try {
-            List<double[]> route = LL.dantiaoxianlu(app.data.pqx, 0, 10.0);
-            List<Object[]> mapData = new ArrayList<>();
-            
+            allRoadsList.clear();
+            List<String> roadNames = new ArrayList<>();
+            List<List<Object[]>> multiData = new ArrayList<>();
+
+            MapRoadData mainRoad = new MapRoadData("主线", app.data.pqx);
+            allRoadsList.add(mainRoad);
+
+            if (app.data.extraRoads != null) {
+                allRoadsList.addAll(app.data.extraRoads);
+            }
+
             double[][] lonlat = app.data.controlLonLat;
             double[][] xy = app.data.controlXy;
             if (lonlat == null || xy == null || lonlat.length == 0 || lonlat.length != xy.length) return;
@@ -162,20 +223,32 @@ public class RealMapActivity extends BaseNavActivity {
             int zone = (int) Math.floor((center + 180) / 6) + 1;
             boolean north = lonlat[0][1] >= 0;
 
-            for (int i = 0; i < route.size(); i++) {
-                double[] pt = route.get(i);
-                double[] lsxy = Projection.fourParameterTransform(pt[1], pt[2], cs4[0], cs4[1], cs4[2], cs4[3]);
-                double[] lb = isUtm ? Projection.utm_unproj(lsxy[0], lsxy[1], north, zone) : Projection.gauss_unproj(lsxy[0], lsxy[1], center);
+            for (MapRoadData road : allRoadsList) {
+                roadNames.add(road.name);
+                List<double[]> route = LL.dantiaoxianlu(road.pqx, 0, 10.0);
+                List<Object[]> mapData = new ArrayList<>();
 
-                double lon = lb[0];
-                double lat = lb[1];
+                for (int i = 0; i < route.size(); i++) {
+                    double[] pt = route.get(i);
+                    double[] lsxy = Projection.fourParameterTransform(pt[1], pt[2], cs4[0], cs4[1], cs4[2], cs4[3]);
+                    double[] lb = isUtm ? Projection.utm_unproj(lsxy[0], lsxy[1], north, zone) : Projection.gauss_unproj(lsxy[0], lsxy[1], center);
 
-                if (Double.isNaN(lon) || Double.isNaN(lat) || lon == 0.0) continue;
+                    double lon = lb[0];
+                    double lat = lb[1];
+                    if (Double.isNaN(lon) || Double.isNaN(lat) || lon == 0.0) continue;
 
-                String kStr = LL.hua_Num2K(pt[0]);
-                mapData.add(new Object[]{lat, lon, kStr, pt[3]});
+                    String kStr = LL.hua_Num2K(pt[0]);
+                    mapData.add(new Object[]{lat, lon, kStr, pt[3]});
+                }
+                multiData.add(mapData);
             }
-            mapView.setRouteData(mapData);
+
+            ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, roadNames);
+            adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+            spRoads.setAdapter(adapter);
+
+            mapView.setMultiRouteData(multiData);
+
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -197,14 +270,13 @@ public class RealMapActivity extends BaseNavActivity {
                 final double lat = loc.getLatitude();
 
                 runOnUiThread(() -> {
-                    if (app.data == null) {
-                        mapView.updateGps(lat, lon, "未选项目", "");
-                        return;
-                    }
+                    if (app.data == null || allRoadsList.isEmpty()) return;
+                    MapRoadData currentRoad = allRoadsList.get(currentSelectedRoad);
+
                     double[] xy = Projection.gps2Xy(lon, lat, app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
                     if (xy == null || xy.length < 2) return;
 
-                    double[] kb = LL.hua_Fs(app.data.pqx, xy[0], xy[1]);
+                    double[] kb = LL.hua_Fs(currentRoad.pqx, xy[0], xy[1]);
                     String stationStr = kb[0] < 0 ? "超出范围" : LL.hua_Num2K(kb[0]);
                     String offsetStr = kb[0] < 0 ? "--" : String.format("%.3f m (%s)", Math.abs(kb[1]), kb[1] < 0 ? "左" : "右");
                     

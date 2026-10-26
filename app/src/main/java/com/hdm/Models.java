@@ -122,3 +122,15 @@ class ComputeResult {
     public SectionResult result;
     public String errorMessage;
 }
+
+
+// 专用于地图多线路显示的类
+class MapRoadData {
+    public String name;
+    public double[][] pqx;
+    
+    public MapRoadData(String name, double[][] pqx) {
+        this.name = name;
+        this.pqx = pqx;
+    }
+}
