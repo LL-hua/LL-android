@@ -1,6 +1,8 @@
 package com.hdm;
 
 import android.Manifest;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.location.Location;
@@ -28,6 +30,7 @@ public class RealMapActivity extends BaseNavActivity {
     private CanvasMapView mapView;
     private LinearLayout content;
     private Spinner spRoads;
+    private TextView btnType;
 
     private LocationManager lm;
     private LocationListener listener;
@@ -91,9 +94,9 @@ public class RealMapActivity extends BaseNavActivity {
             public void onNothingSelected(AdapterView<?> parent) {}
         });
 
-        // 右上角：切换图层
-        TextView btnType = new TextView(this);
-        btnType.setText("卫星");
+        // 图源切换按钮
+        btnType = new TextView(this);
+        btnType.setText("路网");
         btnType.setTextSize(14);
         btnType.setTextColor(0xFF0078D4);
         btnType.setBackgroundColor(0xEEFFFFFF);
@@ -109,19 +112,7 @@ public class RealMapActivity extends BaseNavActivity {
 
         btnType.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
-                if (mapView != null) {
-                    String txt = btnType.getText().toString();
-                    if (txt.equals("卫星")) {
-                        mapView.setMapType(CanvasMapView.MAP_SATELLITE);
-                        btnType.setText("地形");
-                    } else if (txt.equals("地形")) {
-                        mapView.setMapType(CanvasMapView.MAP_TOPO);
-                        btnType.setText("路网");
-                    } else {
-                        mapView.setMapType(CanvasMapView.MAP_ROAD);
-                        btnType.setText("卫星");
-                    }
-                }
+                showMapTypeDialog();
             }
         });
 
@@ -183,6 +174,38 @@ public class RealMapActivity extends BaseNavActivity {
         if (app.data != null) {
             loadAllRoutes();
         }
+    }
+
+    // 核心弹窗：图源选择
+    private void showMapTypeDialog() {
+        final String[] items = {"谷歌路网", "谷歌卫星", "地形图", "OSM 地图"};
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("选择底图");
+        builder.setItems(items, new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                if (mapView == null) return;
+                switch (which) {
+                    case 0:
+                        mapView.setMapType(CanvasMapView.MAP_ROAD);
+                        btnType.setText("路网");
+                        break;
+                    case 1:
+                        mapView.setMapType(CanvasMapView.MAP_SATELLITE);
+                        btnType.setText("卫星");
+                        break;
+                    case 2:
+                        mapView.setMapType(CanvasMapView.MAP_TOPO);
+                        btnType.setText("地形");
+                        break;
+                    case 3:
+                        mapView.setMapType(CanvasMapView.MAP_OSM);
+                        btnType.setText("OSM");
+                        break;
+                }
+            }
+        });
+        builder.show();
     }
 
     private void loadAllRoutes() {
