@@ -194,50 +194,61 @@ public class CanvasMapView extends View {
     }
 
     private void animateToBounds(double minLat, double maxLat, double minLng, double maxLng) {
-        double centerLatTarget = (minLat + maxLat) / 2.0;
-        double centerLngTarget = (minLng + maxLng) / 2.0;
+    double centerLatTarget = (minLat + maxLat) / 2.0;
+    double centerLngTarget = (minLng + maxLng) / 2.0;
 
-        float calculatedZoom = 15.0f;
-        if (maxLat > minLat && maxLng > minLng) {
-            int tileZoom = 15;
-            double[] p1 = latLngToWorldPixel(maxLat, minLng, tileZoom);
-            double[] p2 = latLngToWorldPixel(minLat, maxLng, tileZoom);
-            double w = Math.abs(p2[0] - p1[0]);
-            double h = Math.abs(p2[1] - p1[1]);
+    float calculatedZoom = 15.0f;
+    if (maxLat > minLat && maxLng > minLng) {
+        int tileZoom = 15;
+        double[] p1 = latLngToWorldPixel(maxLat, minLng, tileZoom);
+        double[] p2 = latLngToWorldPixel(minLat, maxLng, tileZoom);
+        double w = Math.abs(p2[0] - p1[0]);
+        double h = Math.abs(p1[1] - p2[1]);
 
-            double pixelW = getWidth() * 0.8;
-            double pixelH = getHeight() * 0.8;
-
-            float scaleX = (float) (pixelW / w);
-            float scaleY = (float) (pixelH / h);
-            float scale = Math.min(scaleX, scaleY);
-
-            calculatedZoom = (float) (tileZoom + Math.log(scale) / Math.log(2));
-            if (calculatedZoom < 3.0f) calculatedZoom = 3.0f;
-            if (calculatedZoom > 18.0f) calculatedZoom = 18.0f;
+        // 核心修复：防止第一帧 getWidth() 为 0 导致算出 NaN
+        float screenWidth = getWidth();
+        float screenHeight = getHeight();
+        if (screenWidth == 0 || screenHeight == 0) {
+            screenWidth = getResources().getDisplayMetrics().widthPixels;
+            screenHeight = getResources().getDisplayMetrics().heightPixels;
         }
 
-        final float targetZoom = calculatedZoom; 
+        // 留出 120 像素的屏幕边距，绝对包住
+        double pixelW = screenWidth - 120;
+        double pixelH = screenHeight - 120;
+        if (pixelW < 100) pixelW = 100;
+        if (pixelH < 100) pixelH = 100;
 
-        final double startLat = centerLat;
-        final double startLng = centerLng;
-        final float startZoom = zoom;
+        float scaleX = (float) (pixelW / (w * scaleFactor));
+        float scaleY = (float) (pixelH / (h * scaleFactor));
+        float scale = Math.min(scaleX, scaleY);
 
-        if (moveAnimator != null) moveAnimator.cancel();
-        moveAnimator = ValueAnimator.ofFloat(0f, 1f);
-        moveAnimator.setDuration(600);
-        moveAnimator.addUpdateListener(animation -> {
-            float t = animation.getAnimatedFraction();
-            float ease = 1 - (1 - t) * (1 - t);
-            
-            centerLat = startLat + (centerLatTarget - startLat) * ease;
-            centerLng = startLng + (centerLngTarget - startLng) * ease;
-            zoom = startZoom + (targetZoom - startZoom) * ease;
-            invalidate();
-        });
-        moveAnimator.start();
+        calculatedZoom = (float) (tileZoom + Math.log(scale) / Math.log(2));
+        if (calculatedZoom < 3.0f) calculatedZoom = 3.0f;
+        if (calculatedZoom > 18.0f) calculatedZoom = 18.0f;
+        if (Float.isNaN(calculatedZoom)) calculatedZoom = 15.0f;
     }
 
+    final float targetZoom = calculatedZoom; 
+
+    final double startLat = centerLat;
+    final double startLng = centerLng;
+    final float startZoom = zoom;
+
+    if (moveAnimator != null) moveAnimator.cancel();
+    moveAnimator = ValueAnimator.ofFloat(0f, 1f);
+    moveAnimator.setDuration(600);
+    moveAnimator.addUpdateListener(animation -> {
+        float t = animation.getAnimatedFraction();
+        float ease = 1 - (1 - t) * (1 - t);
+        
+        centerLat = startLat + (centerLatTarget - startLat) * ease;
+        centerLng = startLng + (centerLngTarget - startLng) * ease;
+        zoom = startZoom + (targetZoom - startZoom) * ease;
+        invalidate();
+    });
+    moveAnimator.start();
+}
     public void updateGps(double lat, double lng, String kStr, String bStr) {
         this.gpsLat = lat;
         this.gpsLng = lng;

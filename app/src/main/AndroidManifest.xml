@@ -13,11 +13,11 @@
         android:name=".MyApp"
         android:allowBackup="true"
         android:icon="@drawable/ico"
-        android:label="道路测量"
+        android:label="刘建华"
         android:usesCleartextTraffic="true"
         android:theme="@android:style/Theme.Light.NoTitleBar">
         
-        <activity android:name=".EarthworkActivity" android:exported="true">
+        <activity android:name=".RealMapActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -26,6 +26,6 @@
         
         <activity android:name=".CalcActivity" android:exported="false" />
         <activity android:name=".LayoutActivity" android:exported="false" />
-        <activity android:name=".RealMapActivity" android:exported="false" />
+        <activity android:name=".EarthworkActivity" android:exported="false" />
     </application>
 </manifest>
