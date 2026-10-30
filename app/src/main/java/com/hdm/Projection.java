@@ -391,10 +391,12 @@ public class Projection {
         for (int i = 0; i < n; i++) {
             if (p.contains("gao")) {
                 double[] ls = gauss_proj(ctrlLonLat[i][0], ctrlLonLat[i][1], center);
-                sourceXy[i * 2] = ls[0]; sourceXy[i * 2 + 1] = ls[1];
+                sourceXy[i * 2] = ls[0];
+                sourceXy[i * 2 + 1] = ls[1];
             } else if (p.contains("utm")) {
                 double[] ls = utm_proj(ctrlLonLat[i][0], ctrlLonLat[i][1]);
-                sourceXy[i * 2] = ls[0]; sourceXy[i * 2 + 1] = ls[1];
+                sourceXy[i * 2] = ls[0];
+                sourceXy[i * 2 + 1] = ls[1];
             }
             targetXy[i * 2] = ctrlXy[i][0];
             targetXy[i * 2 + 1] = ctrlXy[i][1];
