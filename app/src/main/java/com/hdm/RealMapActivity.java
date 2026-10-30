@@ -5,6 +5,8 @@ import android.app.AlertDialog;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
@@ -31,7 +33,7 @@ public class RealMapActivity extends BaseNavActivity {
     private LinearLayout content;
     private Spinner spRoads;
     private TextView btnType;
-    private TextView btnRoadNames; // 新增：路名开关
+    private TextView btnRoadNames; // 路名开关
 
     private LocationManager lm;
     private LocationListener listener;
@@ -70,6 +72,14 @@ public class RealMapActivity extends BaseNavActivity {
         if (lm != null && listener == null) startGps();
     }
 
+    // 辅助方法：生成圆角背景
+    private GradientDrawable makeRoundRectBg(int color, float radiusDp) {
+        GradientDrawable gd = new GradientDrawable();
+        gd.setColor(color);
+        gd.setCornerRadius(dp(radiusDp));
+        return gd;
+    }
+
     private void initUI() {
         content.removeAllViews();
 
@@ -79,14 +89,16 @@ public class RealMapActivity extends BaseNavActivity {
         mapView = new CanvasMapView(this, null);
         mapBox.addView(mapView, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
-        // 左上角：路名开关
+        // ================= 1. 左上角：路名开关 =================
         btnRoadNames = new TextView(this);
         btnRoadNames.setText("显示路名");
         btnRoadNames.setTextSize(14);
-        btnRoadNames.setTextColor(0xFF0078D4);
-        btnRoadNames.setBackgroundColor(0xEEFFFFFF);
+        btnRoadNames.setTextColor(0xFF333333);
+        btnRoadNames.setBackground(makeRoundRectBg(0xF5FFFFFF, 8)); // 圆角白底
+        btnRoadNames.setElevation(dp(4)); // 阴影
         btnRoadNames.setPadding(dp(16), dp(8), dp(16), dp(8));
         btnRoadNames.setGravity(Gravity.CENTER);
+        
         FrameLayout.LayoutParams lpNames = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP | Gravity.LEFT);
@@ -95,6 +107,85 @@ public class RealMapActivity extends BaseNavActivity {
         btnRoadNames.setLayoutParams(lpNames);
         mapBox.addView(btnRoadNames);
 
+        // ================= 2. 右上角：组合控制区 =================
+        LinearLayout rightTopLayout = new LinearLayout(this);
+        rightTopLayout.setOrientation(LinearLayout.VERTICAL);
+        rightTopLayout.setGravity(Gravity.END);
+        
+        FrameLayout.LayoutParams lpRightTop = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP | Gravity.RIGHT);
+        lpRightTop.topMargin = dp(16);
+        lpRightTop.rightMargin = dp(16);
+        rightTopLayout.setLayoutParams(lpRightTop);
+
+        // 路线选择下拉框（包一层圆角背景）
+        spRoads = new Spinner(this);
+        spRoads.setBackgroundColor(Color.TRANSPARENT); // 自身透明，露出底色
+        LinearLayout spContainer = new LinearLayout(this);
+        spContainer.setBackground(makeRoundRectBg(0xF5FFFFFF, 8));
+        spContainer.setElevation(dp(4));
+        spContainer.setPadding(dp(8), 0, dp(8), 0);
+        spContainer.addView(spRoads);
+        rightTopLayout.addView(spContainer);
+
+        // 图源切换按钮
+        btnType = new TextView(this);
+        btnType.setText("路网");
+        btnType.setTextSize(14);
+        btnType.setTextColor(0xFF333333);
+        btnType.setBackground(makeRoundRectBg(0xF5FFFFFF, 8));
+        btnType.setElevation(dp(4));
+        btnType.setPadding(dp(16), dp(8), dp(16), dp(8));
+        btnType.setGravity(Gravity.CENTER);
+        
+        LinearLayout.LayoutParams lpType = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lpType.topMargin = dp(12); // 与上方 Spinner 错开距离
+        btnType.setLayoutParams(lpType);
+        rightTopLayout.addView(btnType);
+        
+        mapBox.addView(rightTopLayout);
+
+        // ================= 3. 左下角：缩放全部 (FAB) =================
+        TextView btnFitAll = new TextView(this);
+        btnFitAll.setText("⛶");
+        btnFitAll.setTextSize(22);
+        btnFitAll.setTextColor(0xFF0078D4); // 主题蓝
+        btnFitAll.setBackground(makeRoundRectBg(0xF5FFFFFF, 24)); // 大圆角形成圆形
+        btnFitAll.setElevation(dp(4));
+        btnFitAll.setGravity(Gravity.CENTER);
+        
+        int fabSize = dp(48); // 统一悬浮按钮大小
+        FrameLayout.LayoutParams lpFit = new FrameLayout.LayoutParams(
+                fabSize, fabSize,
+                Gravity.BOTTOM | Gravity.LEFT);
+        lpFit.bottomMargin = dp(24);
+        lpFit.leftMargin = dp(16);
+        btnFitAll.setLayoutParams(lpFit);
+        mapBox.addView(btnFitAll);
+
+        // ================= 4. 右下角：一键定位 (FAB) =================
+        TextView btnLocate = new TextView(this);
+        btnLocate.setText("⌂");
+        btnLocate.setTextSize(28);
+        btnLocate.setTextColor(0xFF0078D4); // 主题蓝
+        btnLocate.setBackground(makeRoundRectBg(0xF5FFFFFF, 24));
+        btnLocate.setElevation(dp(4));
+        btnLocate.setGravity(Gravity.CENTER);
+        
+        FrameLayout.LayoutParams lpLoc = new FrameLayout.LayoutParams(
+                fabSize, fabSize,
+                Gravity.BOTTOM | Gravity.RIGHT);
+        lpLoc.bottomMargin = dp(24);
+        lpLoc.rightMargin = dp(16);
+        btnLocate.setLayoutParams(lpLoc);
+        mapBox.addView(btnLocate);
+
+        content.addView(mapBox);
+
+        // ================= 事件绑定 =================
+        
         btnRoadNames.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -105,17 +196,6 @@ public class RealMapActivity extends BaseNavActivity {
                 }
             }
         });
-
-        // 右上角：路线选择下拉框
-        spRoads = new Spinner(this);
-        spRoads.setBackgroundColor(0xEEFFFFFF);
-        FrameLayout.LayoutParams lpSp = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.TOP | Gravity.RIGHT);
-        lpSp.topMargin = dp(16);
-        lpSp.rightMargin = dp(16);
-        spRoads.setLayoutParams(lpSp);
-        mapBox.addView(spRoads);
 
         spRoads.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
@@ -128,22 +208,6 @@ public class RealMapActivity extends BaseNavActivity {
             public void onNothingSelected(AdapterView<?> parent) {}
         });
 
-        // 图源切换按钮
-        btnType = new TextView(this);
-        btnType.setText("路网");
-        btnType.setTextSize(14);
-        btnType.setTextColor(0xFF0078D4);
-        btnType.setBackgroundColor(0xEEFFFFFF);
-        btnType.setPadding(dp(16), dp(8), dp(16), dp(8));
-        btnType.setGravity(Gravity.CENTER);
-        FrameLayout.LayoutParams lpType = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.TOP | Gravity.RIGHT);
-        lpType.topMargin = dp(60);
-        lpType.rightMargin = dp(16);
-        btnType.setLayoutParams(lpType);
-        mapBox.addView(btnType);
-
         btnType.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -151,48 +215,12 @@ public class RealMapActivity extends BaseNavActivity {
             }
         });
 
-        // 左下角：缩放全部道路按钮
-        TextView btnFitAll = new TextView(this);
-        btnFitAll.setText("⛶");
-        btnFitAll.setTextSize(24);
-        btnFitAll.setTextColor(0xFF0078D4);
-        btnFitAll.setBackgroundColor(0xEEFFFFFF);
-        btnFitAll.setPadding(dp(10), dp(8), dp(10), dp(8));
-        btnFitAll.setGravity(Gravity.CENTER);
-
-        FrameLayout.LayoutParams lpFit = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.BOTTOM | Gravity.LEFT);
-        lpFit.bottomMargin = dp(30);
-        lpFit.leftMargin = dp(16);
-        btnFitAll.setLayoutParams(lpFit);
-        mapBox.addView(btnFitAll);
-
         btnFitAll.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 if (mapView != null) mapView.zoomToFitAll();
             }
         });
-
-        // 右下角：一键定位
-        TextView btnLocate = new TextView(this);
-        btnLocate.setText("⌂");
-        btnLocate.setTextSize(32);
-        btnLocate.setTextColor(0xFF0078D4);
-        btnLocate.setBackgroundColor(0xEEFFFFFF);
-        btnLocate.setPadding(dp(16), dp(4), dp(16), dp(8));
-        btnLocate.setGravity(Gravity.CENTER);
-
-        FrameLayout.LayoutParams lpLoc = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.BOTTOM | Gravity.RIGHT);
-        lpLoc.bottomMargin = dp(30);
-        lpLoc.rightMargin = dp(16);
-        btnLocate.setLayoutParams(lpLoc);
-        mapBox.addView(btnLocate);
 
         btnLocate.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -205,8 +233,6 @@ public class RealMapActivity extends BaseNavActivity {
                 }
             }
         });
-
-        content.addView(mapBox);
 
         if (app.data != null) {
             loadAllRoutes();

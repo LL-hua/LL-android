@@ -467,14 +467,22 @@ public class CanvasMapView extends View {
             drawRoadNameLabels(canvas, width, height, roadLabels);
         }
 
+        // ====== 修改部分开始：底部居中显示 GPS 信息框 ======
         if (hasGps) {
             Paint uiTextPaint = new Paint(textPaint);
             uiTextPaint.setTextSize(40f);
+            uiTextPaint.setTextAlign(Paint.Align.LEFT);
+            uiTextPaint.setColor(0xFF333333);
 
             Paint uiBgPaint = new Paint();
-            uiBgPaint.setColor(0xF0FFFFFF);
+            uiBgPaint.setColor(0xF5FFFFFF);
             uiBgPaint.setStyle(Paint.Style.FILL);
             uiBgPaint.setAntiAlias(true);
+
+            Paint uiShadowPaint = new Paint();
+            uiShadowPaint.setColor(0x33000000);
+            uiShadowPaint.setStyle(Paint.Style.FILL);
+            uiShadowPaint.setAntiAlias(true);
 
             String info = "桩号: " + gpsKStr + "\n偏距: " + gpsBStr;
             String[] lines = info.split("\n");
@@ -485,22 +493,33 @@ public class CanvasMapView extends View {
             }
             float textH = uiTextPaint.getTextSize() * lines.length * 1.3f;
 
-            float padLeft = 30f;
+            float padLeft = 50f;
             float padTop = 30f;
-            float boxMargin = 30f;
+            float padBottom = 30f;
+            float boxMarginBottom = 35f; // 距离底部的距离
 
-            RectF bgRect = new RectF(boxMargin, boxMargin,
-                    boxMargin + textW + padLeft * 2,
-                    boxMargin + textH + padTop);
-            canvas.drawRoundRect(bgRect, 20f, 20f, uiBgPaint);
+            float boxWidth = textW + padLeft * 2;
+            float boxHeight = textH + padTop + padBottom;
+
+            // 计算底部居中位置
+            float boxLeft = (width - boxWidth) / 2f;
+            float boxBottom = height - boxMarginBottom;
+            float boxTop = boxBottom - boxHeight;
+            float boxRight = boxLeft + boxWidth;
+
+            RectF bgRect = new RectF(boxLeft, boxTop, boxRight, boxBottom);
+            
+            // 画一点投影
+            canvas.drawRoundRect(boxLeft, boxTop + 6f, boxRight, boxBottom + 6f, 24f, 24f, uiShadowPaint);
+            // 画背景
+            canvas.drawRoundRect(bgRect, 24f, 24f, uiBgPaint);
 
             for (int i = 0; i < lines.length; i++) {
-                canvas.drawText(lines[i],
-                        boxMargin + padLeft,
-                        boxMargin + padTop + uiTextPaint.getTextSize() * (i + 0.8f),
-                        uiTextPaint);
+                float baselineY = boxTop + padTop + uiTextPaint.getTextSize() * (i + 0.85f);
+                canvas.drawText(lines[i], boxLeft + padLeft, baselineY, uiTextPaint);
             }
         }
+        // ====== 修改部分结束 ======
     }
 
     private float calcRoadAngle(List<float[]> pts, int midIdx) {
