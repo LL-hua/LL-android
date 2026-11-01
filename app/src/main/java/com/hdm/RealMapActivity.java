@@ -2,8 +2,8 @@ package com.hdm;
 
 import android.Manifest;
 import android.app.AlertDialog;
-import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
@@ -15,11 +15,9 @@ import android.os.Bundle;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
-import android.widget.AdapterView;
-import android.widget.ArrayAdapter;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
-import android.widget.Spinner;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -31,9 +29,6 @@ public class RealMapActivity extends BaseNavActivity {
     private MyApp app;
     private CanvasMapView mapView;
     private LinearLayout content;
-    private Spinner spRoads;
-    private TextView btnType;
-    private TextView btnRoadNames; // 路名开关
 
     private LocationManager lm;
     private LocationListener listener;
@@ -41,7 +36,14 @@ public class RealMapActivity extends BaseNavActivity {
 
     private List<MapRoadData> allRoadsList = new ArrayList<>();
     private int currentSelectedRoad = 0;
-    private boolean isShowRoadNames = false; // 默认不显示
+    private boolean isShowRoadNames = false;
+    
+    // 持久化状态
+    private int currentMapTypeInt = CanvasMapView.MAP_ROAD; 
+    private String currentMapTypeName = "路网"; 
+    private String lastSelectedRoadName = "主线"; // 记录上次选中的路线名
+
+    private AlertDialog settingsDialog; 
 
     @Override
     protected String currentTab() {
@@ -83,80 +85,52 @@ public class RealMapActivity extends BaseNavActivity {
     private void initUI() {
         content.removeAllViews();
 
+        // 1. 读取全局图源
+        SharedPreferences sp = getSharedPreferences("hdm_config", MODE_PRIVATE);
+        currentMapTypeInt = sp.getInt("last_map_type", CanvasMapView.MAP_ROAD);
+        updateMapTypeName(currentMapTypeInt);
+        
+        // 2. 读取项目专属路线 (按项目名隔离)
+        String projName = (app != null && app.currentProjectName != null) ? app.currentProjectName : "default";
+        String spRoadKey = "last_road_name_" + projName;
+        lastSelectedRoadName = sp.getString(spRoadKey, "主线");
+
         FrameLayout mapBox = new FrameLayout(this);
         mapBox.setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT));
 
         mapView = new CanvasMapView(this, null);
+        // 恢复地图图源
+        mapView.setMapType(currentMapTypeInt);
         mapBox.addView(mapView, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
-        // ================= 1. 左上角：路名开关 =================
-        btnRoadNames = new TextView(this);
-        btnRoadNames.setText("显示路名");
-        btnRoadNames.setTextSize(14);
-        btnRoadNames.setTextColor(0xFF333333);
-        btnRoadNames.setBackground(makeRoundRectBg(0xF5FFFFFF, 8)); // 圆角白底
-        btnRoadNames.setElevation(dp(4)); // 阴影
-        btnRoadNames.setPadding(dp(16), dp(8), dp(16), dp(8));
-        btnRoadNames.setGravity(Gravity.CENTER);
+        int fabSize = dp(48); // 统一悬浮按钮大小
+
+        // ================= 1. 左上角：菜单按钮 (☰) =================
+        TextView btnMenu = new TextView(this);
+        btnMenu.setText("☰");
+        btnMenu.setTextSize(24);
+        btnMenu.setTextColor(0xFF333333);
+        btnMenu.setBackground(makeRoundRectBg(0xF5FFFFFF, 8));
+        btnMenu.setElevation(dp(4));
+        btnMenu.setGravity(Gravity.CENTER);
         
-        FrameLayout.LayoutParams lpNames = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+        FrameLayout.LayoutParams lpMenu = new FrameLayout.LayoutParams(
+                fabSize, fabSize,
                 Gravity.TOP | Gravity.LEFT);
-        lpNames.topMargin = dp(16);
-        lpNames.leftMargin = dp(16);
-        btnRoadNames.setLayoutParams(lpNames);
-        mapBox.addView(btnRoadNames);
+        lpMenu.topMargin = dp(16);
+        lpMenu.leftMargin = dp(16);
+        btnMenu.setLayoutParams(lpMenu);
+        mapBox.addView(btnMenu);
 
-        // ================= 2. 右上角：组合控制区 =================
-        LinearLayout rightTopLayout = new LinearLayout(this);
-        rightTopLayout.setOrientation(LinearLayout.VERTICAL);
-        rightTopLayout.setGravity(Gravity.END);
-        
-        FrameLayout.LayoutParams lpRightTop = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.TOP | Gravity.RIGHT);
-        lpRightTop.topMargin = dp(16);
-        lpRightTop.rightMargin = dp(16);
-        rightTopLayout.setLayoutParams(lpRightTop);
-
-        // 路线选择下拉框（包一层圆角背景）
-        spRoads = new Spinner(this);
-        spRoads.setBackgroundColor(Color.TRANSPARENT); // 自身透明，露出底色
-        LinearLayout spContainer = new LinearLayout(this);
-        spContainer.setBackground(makeRoundRectBg(0xF5FFFFFF, 8));
-        spContainer.setElevation(dp(4));
-        spContainer.setPadding(dp(8), 0, dp(8), 0);
-        spContainer.addView(spRoads);
-        rightTopLayout.addView(spContainer);
-
-        // 图源切换按钮
-        btnType = new TextView(this);
-        btnType.setText("路网");
-        btnType.setTextSize(14);
-        btnType.setTextColor(0xFF333333);
-        btnType.setBackground(makeRoundRectBg(0xF5FFFFFF, 8));
-        btnType.setElevation(dp(4));
-        btnType.setPadding(dp(16), dp(8), dp(16), dp(8));
-        btnType.setGravity(Gravity.CENTER);
-        
-        LinearLayout.LayoutParams lpType = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        lpType.topMargin = dp(12); // 与上方 Spinner 错开距离
-        btnType.setLayoutParams(lpType);
-        rightTopLayout.addView(btnType);
-        
-        mapBox.addView(rightTopLayout);
-
-        // ================= 3. 左下角：缩放全部 (FAB) =================
+        // ================= 2. 左下角：缩放全部 (FAB) =================
         TextView btnFitAll = new TextView(this);
         btnFitAll.setText("⛶");
         btnFitAll.setTextSize(22);
-        btnFitAll.setTextColor(0xFF0078D4); // 主题蓝
-        btnFitAll.setBackground(makeRoundRectBg(0xF5FFFFFF, 24)); // 大圆角形成圆形
+        btnFitAll.setTextColor(0xFF0078D4);
+        btnFitAll.setBackground(makeRoundRectBg(0xF5FFFFFF, 24));
         btnFitAll.setElevation(dp(4));
         btnFitAll.setGravity(Gravity.CENTER);
         
-        int fabSize = dp(48); // 统一悬浮按钮大小
         FrameLayout.LayoutParams lpFit = new FrameLayout.LayoutParams(
                 fabSize, fabSize,
                 Gravity.BOTTOM | Gravity.LEFT);
@@ -165,11 +139,11 @@ public class RealMapActivity extends BaseNavActivity {
         btnFitAll.setLayoutParams(lpFit);
         mapBox.addView(btnFitAll);
 
-        // ================= 4. 右下角：一键定位 (FAB) =================
+        // ================= 3. 右下角：一键定位 (FAB) =================
         TextView btnLocate = new TextView(this);
         btnLocate.setText("⌂");
         btnLocate.setTextSize(28);
-        btnLocate.setTextColor(0xFF0078D4); // 主题蓝
+        btnLocate.setTextColor(0xFF0078D4);
         btnLocate.setBackground(makeRoundRectBg(0xF5FFFFFF, 24));
         btnLocate.setElevation(dp(4));
         btnLocate.setGravity(Gravity.CENTER);
@@ -186,51 +160,19 @@ public class RealMapActivity extends BaseNavActivity {
 
         // ================= 事件绑定 =================
         
-        btnRoadNames.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                isShowRoadNames = !isShowRoadNames;
-                btnRoadNames.setText(isShowRoadNames ? "隐藏路名" : "显示路名");
-                if (mapView != null) {
-                    mapView.setShowRoadNames(isShowRoadNames);
-                }
-            }
+        // 点击菜单弹出设置面板
+        btnMenu.setOnClickListener(v -> showSettingsDialog());
+
+        btnFitAll.setOnClickListener(v -> {
+            if (mapView != null) mapView.zoomToFitAll();
         });
 
-        spRoads.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                currentSelectedRoad = position;
-                if (mapView != null) mapView.switchRoad(position);
-            }
-
-            @Override
-            public void onNothingSelected(AdapterView<?> parent) {}
-        });
-
-        btnType.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                showMapTypeDialog();
-            }
-        });
-
-        btnFitAll.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                if (mapView != null) mapView.zoomToFitAll();
-            }
-        });
-
-        btnLocate.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                if (lm != null && !lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                    Toast.makeText(RealMapActivity.this, "请先打开手机的GPS定位服务", Toast.LENGTH_LONG).show();
-                    startActivity(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS));
-                } else if (mapView != null) {
-                    mapView.locateMe();
-                }
+        btnLocate.setOnClickListener(v -> {
+            if (lm != null && !lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                Toast.makeText(RealMapActivity.this, "请先打开手机的GPS定位服务", Toast.LENGTH_LONG).show();
+                startActivity(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS));
+            } else if (mapView != null) {
+                mapView.locateMe();
             }
         });
 
@@ -239,35 +181,185 @@ public class RealMapActivity extends BaseNavActivity {
         }
     }
 
-    private void showMapTypeDialog() {
-        final String[] items = {"谷歌路网", "谷歌卫星", "地形图", "OSM 地图"};
+    private void updateMapTypeName(int type) {
+        if (type == CanvasMapView.MAP_ROAD) currentMapTypeName = "路网";
+        else if (type == CanvasMapView.MAP_SATELLITE) currentMapTypeName = "卫星";
+        else if (type == CanvasMapView.MAP_TOPO) currentMapTypeName = "地形";
+        else if (type == CanvasMapView.MAP_OSM) currentMapTypeName = "OSM";
+    }
+
+    // 弹出设置控制台面板
+    private void showSettingsDialog() {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("选择底图");
-        builder.setItems(items, new DialogInterface.OnClickListener() {
-            @Override
-            public void onClick(DialogInterface dialog, int which) {
-                if (mapView == null) return;
-                switch (which) {
-                    case 0:
-                        mapView.setMapType(CanvasMapView.MAP_ROAD);
-                        btnType.setText("路网");
-                        break;
-                    case 1:
-                        mapView.setMapType(CanvasMapView.MAP_SATELLITE);
-                        btnType.setText("卫星");
-                        break;
-                    case 2:
-                        mapView.setMapType(CanvasMapView.MAP_TOPO);
-                        btnType.setText("地形");
-                        break;
-                    case 3:
-                        mapView.setMapType(CanvasMapView.MAP_OSM);
-                        btnType.setText("OSM");
-                        break;
-                }
-            }
+        
+        ScrollView scrollView = new ScrollView(this);
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(dp(24), dp(24), dp(24), dp(16));
+        
+        // 1. 标题
+        TextView title = new TextView(this);
+        title.setText("地图设置");
+        title.setTextSize(18);
+        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        title.setTextColor(0xFF333333);
+        layout.addView(title);
+        
+        // 2. 路名开关
+        LinearLayout rowName = new LinearLayout(this);
+        rowName.setOrientation(LinearLayout.HORIZONTAL);
+        rowName.setGravity(Gravity.CENTER_VERTICAL);
+        rowName.setPadding(0, dp(20), 0, dp(16));
+        TextView tvName = new TextView(this);
+        tvName.setText("显示道路名称");
+        tvName.setTextSize(16);
+        tvName.setTextColor(0xFF555555);
+        tvName.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        rowName.addView(tvName);
+        
+        final TextView btnSwitch = new TextView(this);
+        btnSwitch.setText(isShowRoadNames ? "已开启" : "已关闭");
+        btnSwitch.setTextColor(isShowRoadNames ? Color.WHITE : 0xFF555555);
+        btnSwitch.setBackground(makeRoundRectBg(isShowRoadNames ? 0xFF0078D4 : 0xFFE0E0E0, 16));
+        btnSwitch.setPadding(dp(16), dp(6), dp(16), dp(6));
+        btnSwitch.setOnClickListener(v -> {
+            isShowRoadNames = !isShowRoadNames;
+            btnSwitch.setText(isShowRoadNames ? "已开启" : "已关闭");
+            btnSwitch.setTextColor(isShowRoadNames ? Color.WHITE : 0xFF555555);
+            btnSwitch.setBackground(makeRoundRectBg(isShowRoadNames ? 0xFF0078D4 : 0xFFE0E0E0, 16));
+            if (mapView != null) mapView.setShowRoadNames(isShowRoadNames);
         });
-        builder.show();
+        rowName.addView(btnSwitch);
+        layout.addView(rowName);
+        
+        // 分割线
+        View line1 = new View(this);
+        line1.setBackgroundColor(0xFFEEEEEE);
+        LinearLayout.LayoutParams lpLine = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1));
+        lpLine.bottomMargin = dp(16);
+        layout.addView(line1, lpLine);
+        
+        // 3. 图源选择（展开，横排4个按钮）
+        TextView tvMapTypeTitle = new TextView(this);
+        tvMapTypeTitle.setText("地图图源");
+        tvMapTypeTitle.setTextSize(16);
+        tvMapTypeTitle.setTextColor(0xFF333333);
+        tvMapTypeTitle.setTypeface(null, android.graphics.Typeface.BOLD);
+        layout.addView(tvMapTypeTitle);
+        
+        String[] mapTypes = {"路网", "卫星", "地形", "OSM"};
+        final int[] mapTypeValues = {
+                CanvasMapView.MAP_ROAD, 
+                CanvasMapView.MAP_SATELLITE, 
+                CanvasMapView.MAP_TOPO, 
+                CanvasMapView.MAP_OSM
+        };
+        LinearLayout mapTypeLayout = new LinearLayout(this);
+        mapTypeLayout.setOrientation(LinearLayout.HORIZONTAL);
+        mapTypeLayout.setPadding(0, dp(12), 0, dp(16));
+        
+        final TextView[] mapTypeBtns = new TextView[4];
+        for (int i = 0; i < 4; i++) {
+            final int index = i;
+            TextView btn = new TextView(this);
+            btn.setText(mapTypes[i]);
+            btn.setTextSize(14);
+            btn.setGravity(Gravity.CENTER);
+            boolean isSelected = (currentMapTypeInt == mapTypeValues[i]);
+            btn.setTextColor(isSelected ? Color.WHITE : 0xFF555555);
+            btn.setBackground(makeRoundRectBg(isSelected ? 0xFF0078D4 : 0xFFF0F0F0, 16));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+            if (i > 0) lp.leftMargin = dp(8);
+            btn.setLayoutParams(lp);
+            btn.setPadding(0, dp(8), 0, dp(8));
+            
+            btn.setOnClickListener(v -> {
+                if (mapView == null) return;
+                currentMapTypeInt = mapTypeValues[index];
+                updateMapTypeName(currentMapTypeInt);
+                
+                // 更新地图
+                mapView.setMapType(currentMapTypeInt);
+                
+                // 保存到 SharedPreferences 持久化
+                getSharedPreferences("hdm_config", MODE_PRIVATE).edit()
+                        .putInt("last_map_type", currentMapTypeInt).apply();
+                
+                // 更新按钮选中状态
+                for (int j = 0; j < 4; j++) {
+                    boolean sel = (currentMapTypeInt == mapTypeValues[j]);
+                    mapTypeBtns[j].setTextColor(sel ? Color.WHITE : 0xFF555555);
+                    mapTypeBtns[j].setBackground(makeRoundRectBg(sel ? 0xFF0078D4 : 0xFFF0F0F0, 16));
+                }
+            });
+            mapTypeBtns[i] = btn;
+            mapTypeLayout.addView(btn);
+        }
+        layout.addView(mapTypeLayout);
+        
+        // 分割线
+        View line2 = new View(this);
+        line2.setBackgroundColor(0xFFEEEEEE);
+        layout.addView(line2, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
+        
+        // 4. 路线选择（展开，直接平铺列表）
+        TextView tvRouteTitle = new TextView(this);
+        tvRouteTitle.setText("当前路线");
+        tvRouteTitle.setTextSize(16);
+        tvRouteTitle.setTextColor(0xFF333333);
+        tvRouteTitle.setTypeface(null, android.graphics.Typeface.BOLD);
+        tvRouteTitle.setPadding(0, dp(16), 0, dp(12));
+        layout.addView(tvRouteTitle);
+        
+        if (allRoadsList.isEmpty()) {
+            TextView tvNoRoute = new TextView(this);
+            tvNoRoute.setText("未加载路线数据");
+            tvNoRoute.setTextColor(0xFF999999);
+            tvNoRoute.setPadding(0, dp(12), 0, dp(12));
+            layout.addView(tvNoRoute);
+        } else {
+            for (int i = 0; i < allRoadsList.size(); i++) {
+                final int index = i;
+                String roadName = allRoadsList.get(i).name;
+                boolean isSelected = (currentSelectedRoad == i);
+                
+                TextView btnRoute = new TextView(this);
+                btnRoute.setText(roadName);
+                btnRoute.setTextSize(16);
+                btnRoute.setTextColor(isSelected ? 0xFF0078D4 : 0xFF333333);
+                btnRoute.setPadding(dp(12), dp(12), dp(12), dp(12));
+                if (isSelected) {
+                    btnRoute.setBackground(makeRoundRectBg(0x1A0078D4, 8)); // 淡蓝色背景
+                }
+                
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                lp.topMargin = dp(4);
+                btnRoute.setLayoutParams(lp);
+                
+                btnRoute.setOnClickListener(v -> {
+                    currentSelectedRoad = index;
+                    lastSelectedRoadName = roadName; // 记录名称
+                    
+                    // 持久化路线名称（按项目隔离）
+                    String projName = (app != null && app.currentProjectName != null) ? app.currentProjectName : "default";
+                    String spRoadKey = "last_road_name_" + projName;
+                    
+                    getSharedPreferences("hdm_config", MODE_PRIVATE).edit()
+                            .putString(spRoadKey, lastSelectedRoadName).apply();
+
+                    if (mapView != null) mapView.switchRoad(index);
+                    // 选中路线后，自动关闭面板让用户看地图
+                    if (settingsDialog != null) settingsDialog.dismiss();
+                });
+                layout.addView(btnRoute);
+            }
+        }
+        
+        scrollView.addView(layout);
+        builder.setView(scrollView);
+        builder.setPositiveButton("完成", null);
+        settingsDialog = builder.create();
+        settingsDialog.show();
     }
 
     private void loadAllRoutes() {
@@ -332,13 +424,24 @@ public class RealMapActivity extends BaseNavActivity {
                 multiData.add(mapData);
             }
 
-            ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, roadNames);
-            adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-            spRoads.setAdapter(adapter);
-
-            // 传入数据并初始化路名显示状态
             mapView.setMultiRouteData(multiData, roadNames);
             mapView.setShowRoadNames(isShowRoadNames);
+
+            // 匹配上次选中的路线名称
+            int targetIndex = 0;
+            for (int i = 0; i < allRoadsList.size(); i++) {
+                if (allRoadsList.get(i).name.equals(lastSelectedRoadName)) {
+                    targetIndex = i;
+                    break;
+                }
+            }
+            currentSelectedRoad = targetIndex;
+            lastSelectedRoadName = allRoadsList.get(currentSelectedRoad).name; // 防错更新
+            
+            // 因为 setMultiRouteData 内部默认调用了 switchRoad(0)，如果 targetIndex 不是 0 才需要单独触发
+            if (targetIndex != 0) {
+                mapView.switchRoad(targetIndex);
+            }
 
         } catch (Exception e) {
             e.printStackTrace();
