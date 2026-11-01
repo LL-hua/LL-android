@@ -114,6 +114,7 @@ public class MainActivity extends BaseNavActivity {
         app.projectFiles.clear();
         app.projectNames.clear();
 
+        // 1. 扫描外部存储
         File sd = Environment.getExternalStorageDirectory();
         File dir = new File(sd, PROJECT_DIR);
         if (!dir.exists()) dir.mkdirs();
@@ -128,9 +129,27 @@ public class MainActivity extends BaseNavActivity {
             }
         }
 
+        // 2. 扫描 assets 内置项目
+        try {
+            String[] assetFiles = getAssets().list("");
+            if (assetFiles != null) {
+                for (String name : assetFiles) {
+                    if (name.toLowerCase().endsWith(".xlsx")) {
+                        File cacheFile = copyAssetToCache(name);
+                        if (cacheFile != null) {
+                            app.projectFiles.add(cacheFile);
+                            app.projectNames.add(cacheFile.getName());
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
         if (app.projectFiles.isEmpty()) {
             app.projectNames.add("（无 .xlsx）");
-            tvInfo.setText("请把 .xlsx 放到 /sdcard/1hdm/");
+            tvInfo.setText("请把 .xlsx 放到 /sdcard/1hdm/ 或 assets 目录");
         } else {
             tvInfo.setText("找到 " + app.projectFiles.size() + " 个项目");
         }

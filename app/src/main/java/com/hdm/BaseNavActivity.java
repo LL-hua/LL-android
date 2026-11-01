@@ -19,6 +19,8 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -118,6 +120,23 @@ public abstract class BaseNavActivity extends Activity {
         }
     }
 
+    // ================= 新增：复制 assets 文件到缓存 =================
+    protected File copyAssetToCache(String assetName) {
+        File file = new File(getFilesDir(), "[内置] " + assetName);
+        try (InputStream is = getAssets().open(assetName);
+             FileOutputStream fos = new FileOutputStream(file)) {
+            byte[] buffer = new byte[8192];
+            int len;
+            while ((len = is.read(buffer)) != -1) {
+                fos.write(buffer, 0, len);
+            }
+            return file;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+
     protected void showProjectDialog() {
         File sd = Environment.getExternalStorageDirectory();
         File dir = new File(sd, "1hdm");
@@ -127,6 +146,7 @@ public abstract class BaseNavActivity extends Activity {
         final List<File> xlsxFiles = new ArrayList<>();
         final List<String> xlsxNames = new ArrayList<>();
 
+        // 1. 扫描外部存储
         if (files != null) {
             for (File f : files) {
                 if (f.isFile() && f.getName().toLowerCase().endsWith(".xlsx")) {
@@ -136,8 +156,26 @@ public abstract class BaseNavActivity extends Activity {
             }
         }
 
+        // 2. 扫描 assets 内置项目
+        try {
+            String[] assetFiles = getAssets().list("");
+            if (assetFiles != null) {
+                for (String name : assetFiles) {
+                    if (name.toLowerCase().endsWith(".xlsx")) {
+                        File cacheFile = copyAssetToCache(name);
+                        if (cacheFile != null) {
+                            xlsxFiles.add(cacheFile);
+                            xlsxNames.add(cacheFile.getName());
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
         if (xlsxFiles.isEmpty()) {
-            Toast.makeText(this, "请把 .xlsx 放到 /sdcard/1hdm/", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "请把 .xlsx 放到 /sdcard/1hdm/ 或 assets 目录", Toast.LENGTH_LONG).show();
             return;
         }
 
