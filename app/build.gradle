@@ -27,10 +27,16 @@ android {
         release {
             // 使用上面的签名
             signingConfig signingConfigs.release
-            // 开启代码压缩和资源优化 (可选，能减小包体积)
+            
+            // 开启代码压缩和混淆
             minifyEnabled true
-            // 开启资源压缩
+            // 开启资源压缩（移除无用的资源文件）
             shrinkResources true
+            
+            // 关键：指定混淆规则文件！
+            // proguard-android-optimize.txt 是官方提供的优化规则
+            // proguard-rules.pro 是你自己写的规则（就在 app 目录下）
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
 }

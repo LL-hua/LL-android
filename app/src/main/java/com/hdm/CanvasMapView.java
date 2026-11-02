@@ -52,12 +52,14 @@ public class CanvasMapView extends View {
     private List<List<Object[]>> multiRoadData;
     private List<String> roadNames = null;
     private int currentRoadIndex = 0;
-    private boolean showRoadNames = false; // 默认不显示路名
+    private boolean showRoadNames = false;
 
     private double gpsLat = 0, gpsLng = 0;
     private String gpsKStr = "--";
     private String gpsBStr = "--";
     private boolean hasGps = false;
+    
+    private float gpsBearing = 0f; // 手机朝向（度）
 
     private ExecutorService executor = Executors.newFixedThreadPool(4);
     private Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -111,7 +113,7 @@ public class CanvasMapView extends View {
         gpsStrokePaint = new Paint();
         gpsStrokePaint.setColor(Color.WHITE);
         gpsStrokePaint.setStyle(Paint.Style.STROKE);
-        gpsStrokePaint.setStrokeWidth(4f);
+        gpsStrokePaint.setStrokeWidth(2f); 
         gpsStrokePaint.setAntiAlias(true);
 
         int maxMemory = (int) (Runtime.getRuntime().maxMemory() / 1024);
@@ -138,6 +140,11 @@ public class CanvasMapView extends View {
     public void setShowRoadNames(boolean show) {
         this.showRoadNames = show;
         invalidate();
+    }
+
+    public void setGpsBearing(float bearing) {
+        this.gpsBearing = bearing;
+        if (hasGps) invalidate();
     }
 
     public void setMultiRouteData(List<List<Object[]>> multiData) {
@@ -328,7 +335,6 @@ public class CanvasMapView extends View {
         int minTileY = (int) Math.floor(startY / 256);
         int maxTileY = (int) Math.floor((startY + height / (scaleFactor * subZoomScale)) / 256);
 
-        // 路名标注锚点：{roadIdx(Integer), screenX(Float), screenY(Float), angleDeg(Float)}
         List<Object[]> roadLabels = new ArrayList<>();
 
         canvas.save();
@@ -346,7 +352,6 @@ public class CanvasMapView extends View {
         }
 
         if (multiRoadData != null && !multiRoadData.isEmpty()) {
-            // ---- 其它（灰色）线路 ----
             for (int r = 0; r < multiRoadData.size(); r++) {
                 if (r == currentRoadIndex) continue;
                 List<Object[]> route = multiRoadData.get(r);
@@ -387,7 +392,6 @@ public class CanvasMapView extends View {
                 }
             }
 
-            // ---- 当前（红色）线路 ----
             List<Object[]> currentRoute = multiRoadData.get(currentRoadIndex);
             if (currentRoute != null && !currentRoute.isEmpty()) {
                 Path path = new Path();
@@ -451,23 +455,62 @@ public class CanvasMapView extends View {
             }
         }
 
+        // ================= 修正：方向与极度低调的箭头 =================
         if (hasGps) {
             double[] gpsWorld = latLngToWorldPixel(gpsLat, gpsLng, tileZoom);
             float gx = (float) (gpsWorld[0] - startX);
             float gy = (float) (gpsWorld[1] - startY);
 
-            canvas.drawCircle(gx, gy, 12, gpsPaint);
-            canvas.drawCircle(gx, gy, 12, gpsStrokePaint);
+            canvas.save();
+            canvas.translate(gx, gy);
+            
+            // 修正方向：去掉负号，让旋转方向与物理方向一致
+            canvas.rotate(gpsBearing);
+
+            // 1. 画底部的白边蓝心圆点
+            canvas.drawCircle(0, 0, 8, gpsStrokePaint); 
+            canvas.drawCircle(0, 0, 6, gpsPaint);        
+
+            // 2. 画极简白色三角形（进一步缩小）
+            Paint triPaint = new Paint();
+            triPaint.setColor(0xCCFFFFFF); // 半透明白
+            triPaint.setStyle(Paint.Style.FILL);
+            triPaint.setAntiAlias(true);
+            
+            Paint triBorder = new Paint();
+            triBorder.setColor(0x33000000); // 极浅黑边
+            triBorder.setStyle(Paint.Style.STROKE);
+            triBorder.setStrokeWidth(1f); 
+            triBorder.setAntiAlias(true);
+
+            Path triPath = new Path();
+            triPath.moveTo(0, -10);   // 尖端高度缩小到 10
+            triPath.lineTo(-3.5f, -1); // 底部宽度缩小到 7
+            triPath.lineTo(3.5f, -1);    
+            triPath.close();
+            
+            canvas.drawPath(triPath, triPaint);
+            canvas.drawPath(triPath, triBorder);
+
+            // 3. 画顶部的红点（极小）
+            Paint redDotPaint = new Paint();
+            redDotPaint.setColor(0xAAE53935); // 淡红色
+            redDotPaint.setStyle(Paint.Style.FILL);
+            redDotPaint.setAntiAlias(true);
+            
+            canvas.drawCircle(0, -10, 2f, redDotPaint);
+
+            canvas.restore();
         }
 
         canvas.restore();
 
-        // 路名标注（屏幕坐标，平行道路）
+        // 路名标注
         if (showRoadNames) {
             drawRoadNameLabels(canvas, width, height, roadLabels);
         }
 
-        // ====== 修改部分开始：底部居中显示 GPS 信息框 ======
+        // ====== 底部居中显示 GPS 信息框 ======
         if (hasGps) {
             Paint uiTextPaint = new Paint(textPaint);
             uiTextPaint.setTextSize(40f);
@@ -496,12 +539,11 @@ public class CanvasMapView extends View {
             float padLeft = 50f;
             float padTop = 30f;
             float padBottom = 30f;
-            float boxMarginBottom = 35f; // 距离底部的距离
+            float boxMarginBottom = 35f;
 
             float boxWidth = textW + padLeft * 2;
             float boxHeight = textH + padTop + padBottom;
 
-            // 计算底部居中位置
             float boxLeft = (width - boxWidth) / 2f;
             float boxBottom = height - boxMarginBottom;
             float boxTop = boxBottom - boxHeight;
@@ -509,9 +551,7 @@ public class CanvasMapView extends View {
 
             RectF bgRect = new RectF(boxLeft, boxTop, boxRight, boxBottom);
             
-            // 画一点投影
             canvas.drawRoundRect(boxLeft, boxTop + 6f, boxRight, boxBottom + 6f, 24f, 24f, uiShadowPaint);
-            // 画背景
             canvas.drawRoundRect(bgRect, 24f, 24f, uiBgPaint);
 
             for (int i = 0; i < lines.length; i++) {
@@ -519,7 +559,6 @@ public class CanvasMapView extends View {
                 canvas.drawText(lines[i], boxLeft + padLeft, baselineY, uiTextPaint);
             }
         }
-        // ====== 修改部分结束 ======
     }
 
     private float calcRoadAngle(List<float[]> pts, int midIdx) {
