@@ -17,8 +17,13 @@ import android.location.LocationManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
+import android.text.Editable;
+import android.text.InputType;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
+import android.view.inputmethod.InputMethodManager;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -41,6 +46,14 @@ public class RealMapActivity extends BaseNavActivity {
     // 传感器相关
     private SensorManager sensorManager;
     private Sensor rotationSensor;
+    
+    // 融合算法相关变量
+    private float currentAzimuth = 0f;       // 屏幕上最终显示的平滑角度
+    private float targetBearing = 0f;        // 目标角度（来源于传感器或GPS）
+    private float currentOffset = 180.0f;    // 用户自定义的校准偏移量
+    private long lastGpsBearingTime = 0L;    // 上一次收到有效GPS航向的时间
+    
+    private EditText etOffset;
 
     private List<MapRoadData> allRoadsList = new ArrayList<>();
     private int currentSelectedRoad = 0;
@@ -101,6 +114,7 @@ public class RealMapActivity extends BaseNavActivity {
         // 读取持久化状态
         SharedPreferences sp = getSharedPreferences("hdm_config", MODE_PRIVATE);
         currentMapTypeInt = sp.getInt("last_map_type", CanvasMapView.MAP_ROAD);
+        currentOffset = sp.getFloat("compass_offset", 180.0f);
         updateMapTypeName(currentMapTypeInt);
         
         String projName = (app != null && app.currentProjectName != null) ? app.currentProjectName : "default";
@@ -133,7 +147,67 @@ public class RealMapActivity extends BaseNavActivity {
         btnMenu.setLayoutParams(lpMenu);
         mapBox.addView(btnMenu);
 
-        // 2. 左下角：缩放全部 (FAB)
+        // ================= 2. 右上角：方向校准输入框 =================
+        LinearLayout offsetLayout = new LinearLayout(this);
+        offsetLayout.setOrientation(LinearLayout.HORIZONTAL);
+        offsetLayout.setGravity(Gravity.CENTER_VERTICAL);
+        offsetLayout.setBackground(makeRoundRectBg(0xF5FFFFFF, 8));
+        offsetLayout.setElevation(dp(4));
+        offsetLayout.setPadding(dp(12), dp(4), dp(12), dp(4));
+
+        TextView tvOffsetLabel = new TextView(this);
+        tvOffsetLabel.setText("校准:");
+        tvOffsetLabel.setTextSize(14);
+        tvOffsetLabel.setTextColor(0xFF555555);
+        offsetLayout.addView(tvOffsetLabel);
+
+        etOffset = new EditText(this);
+        etOffset.setText(String.valueOf(currentOffset));
+        etOffset.setTextSize(14);
+        etOffset.setTextColor(0xFF333333);
+        etOffset.setBackground(null);
+        etOffset.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED);
+        etOffset.setWidth(dp(60));
+        etOffset.setGravity(Gravity.CENTER);
+        offsetLayout.addView(etOffset);
+
+        TextView tvDegree = new TextView(this);
+        tvDegree.setText("°");
+        tvDegree.setTextSize(14);
+        tvDegree.setTextColor(0xFF555555);
+        offsetLayout.addView(tvDegree);
+
+        FrameLayout.LayoutParams lpOffset = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP | Gravity.RIGHT);
+        lpOffset.topMargin = dp(16);
+        lpOffset.rightMargin = dp(16);
+        offsetLayout.setLayoutParams(lpOffset);
+        mapBox.addView(offsetLayout);
+
+        etOffset.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override public void afterTextChanged(Editable s) {
+                try {
+                    if (s.length() > 0 && !s.toString().equals("-") && !s.toString().equals(".")) {
+                        currentOffset = Float.parseFloat(s.toString());
+                        getSharedPreferences("hdm_config", MODE_PRIVATE).edit()
+                                .putFloat("compass_offset", currentOffset).apply();
+                    }
+                } catch (Exception e) {}
+            }
+        });
+
+        mapView.setOnClickListener(v -> {
+            InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+            if (imm != null && etOffset != null) {
+                imm.hideSoftInputFromWindow(etOffset.getWindowToken(), 0);
+                etOffset.clearFocus();
+            }
+        });
+
+        // 3. 左下角：缩放全部 (FAB)
         TextView btnFitAll = new TextView(this);
         btnFitAll.setText("⛶");
         btnFitAll.setTextSize(22);
@@ -150,7 +224,7 @@ public class RealMapActivity extends BaseNavActivity {
         btnFitAll.setLayoutParams(lpFit);
         mapBox.addView(btnFitAll);
 
-        // 3. 右下角：一键定位 (FAB)
+        // 4. 右下角：一键定位 (FAB)
         TextView btnLocate = new TextView(this);
         btnLocate.setText("⌂");
         btnLocate.setTextSize(28);
@@ -190,7 +264,7 @@ public class RealMapActivity extends BaseNavActivity {
         }
     }
 
-    // ================= 传感器回调：直接传给地图上的 GPS 蓝点 =================
+    // ================= 传感器回调：平滑滤波 =================
     private final SensorEventListener sensorListener = new SensorEventListener() {
         @Override
         public void onSensorChanged(SensorEvent event) {
@@ -201,16 +275,35 @@ public class RealMapActivity extends BaseNavActivity {
                 float[] orientation = new float[3];
                 SensorManager.getOrientation(rotationMatrix, orientation);
                 
-                // 方位角（弧度转角度）
                 float azimuthRad = orientation[0];
-                float azimuthDeg = (float) Math.toDegrees(azimuthRad);
-                if (azimuthDeg < 0) {
-                    azimuthDeg += 360;
+                float rawAzimuthDeg = (float) Math.toDegrees(azimuthRad);
+                if (rawAzimuthDeg < 0) {
+                    rawAzimuthDeg += 360;
                 }
                 
-                // 传给地图视图
+                // 应用校准偏移量
+                float sensorBearing = (rawAzimuthDeg + currentOffset) % 360f;
+                if (sensorBearing < 0) sensorBearing += 360f;
+
+                // 融合逻辑：如果超过 3 秒没有收到有效的 GPS 速度航向，才使用传感器的角度
+                if (System.currentTimeMillis() - lastGpsBearingTime > 3000) {
+                    targetBearing = sensorBearing;
+                }
+
+                // 统一平滑处理（无论 targetBearing 来自 GPS 还是传感器，都要平滑）
+                float diff = targetBearing - currentAzimuth;
+                if (diff > 180) diff -= 360;
+                if (diff < -180) diff += 360;
+
+                // 由于 GPS 突变可能很大，稍微加大一点平滑系数让它追上去
+                float alpha = 0.15f; 
+                currentAzimuth = currentAzimuth + alpha * diff;
+                
+                if (currentAzimuth < 0) currentAzimuth += 360;
+                if (currentAzimuth >= 360) currentAzimuth -= 360;
+                
                 if (mapView != null) {
-                    mapView.setGpsBearing(azimuthDeg);
+                    mapView.setGpsBearing(currentAzimuth);
                 }
             }
         }
@@ -488,6 +581,14 @@ public class RealMapActivity extends BaseNavActivity {
                 final double lon = loc.getLongitude();
                 final double lat = loc.getLatitude();
 
+                // ================= 核心融合逻辑：优先使用 GPS 航向 =================
+                // loc.hasBearing() 表示 GPS 芯片算出了移动方向
+                // loc.getSpeed() 的速度大于 1.2m/s（约 4.3km/h，快步走的速度）时，方向才可靠
+                if (loc.hasBearing() && loc.getSpeed() > 1.2f) {
+                    targetBearing = loc.getBearing();
+                    lastGpsBearingTime = System.currentTimeMillis();
+                }
+
                 runOnUiThread(() -> {
                     if (app.data == null || allRoadsList.isEmpty()) return;
                     MapRoadData currentRoad = allRoadsList.get(currentSelectedRoad);
@@ -554,7 +655,7 @@ public class RealMapActivity extends BaseNavActivity {
         }
         // 恢复传感器监听
         if (sensorManager != null && rotationSensor != null) {
-            sensorManager.registerListener(sensorListener, rotationSensor, SensorManager.SENSOR_DELAY_UI);
+            sensorManager.registerListener(sensorListener, rotationSensor, SensorManager.SENSOR_DELAY_GAME);
         }
     }
 
