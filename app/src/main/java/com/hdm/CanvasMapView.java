@@ -135,7 +135,6 @@ public class CanvasMapView extends View {
         };
     }
 
-    // ================= 新增：动态配置图源 =================
     public void setMapSources(List<MapSource> sources) {
         this.mapSources = sources;
         if (sources != null && !sources.isEmpty()) {
@@ -259,12 +258,49 @@ public class CanvasMapView extends View {
         moveAnimator.start();
     }
 
-    private void animateZoom(final float targetZoom) {
+    // ================= 核心：以指定焦点缩放 =================
+    private void animateZoom(final float targetZoom, final float pivotX, final float pivotY) {
         if (zoomAnimator != null && zoomAnimator.isRunning()) return;
-        zoomAnimator = ValueAnimator.ofFloat(zoom, targetZoom);
+        
+        final float startZoom = zoom;
+        final double startCenterLat = centerLat;
+        final double startCenterLng = centerLng;
+        
+        // 1. 计算开始时的世界像素坐标
+        double startWorldSize = 256 * Math.pow(2, startZoom);
+        double startCx = (startCenterLng + 180.0) / 360.0 * startWorldSize;
+        double startSinLat = Math.sin(startCenterLat * Math.PI / 180.0);
+        double startCy = (0.5 - Math.log((1 + startSinLat) / (1 - startSinLat)) / (4 * Math.PI)) * startWorldSize;
+
+        float dx = pivotX - getWidth() / 2f;
+        float dy = pivotY - getHeight() / 2f;
+
+        // 2. 算出焦点对应的世界像素
+        double focusWorldX = startCx + dx / scaleFactor;
+        double focusWorldY = startCy + dy / scaleFactor;
+        
+        // 3. 转化为 z=0 时的基准坐标
+        double baseWorldX = focusWorldX / Math.pow(2, startZoom);
+        double baseWorldY = focusWorldY / Math.pow(2, startZoom);
+
+        zoomAnimator = ValueAnimator.ofFloat(startZoom, targetZoom);
         zoomAnimator.setDuration(250);
         zoomAnimator.addUpdateListener(animation -> {
-            zoom = (float) animation.getAnimatedValue();
+            float currentZoom = (float) animation.getAnimatedValue();
+            zoom = currentZoom;
+            
+            // 4. 在当前 zoom 下，反推为了让焦点不动，中心点该在哪
+            double currentWorldSize = 256 * Math.pow(2, currentZoom);
+            double currentFocusWorldX = baseWorldX * Math.pow(2, currentZoom);
+            double currentFocusWorldY = baseWorldY * Math.pow(2, currentZoom);
+            
+            double newCenterWorldX = currentFocusWorldX - dx / scaleFactor;
+            double newCenterWorldY = currentFocusWorldY - dy / scaleFactor;
+            
+            centerLng = newCenterWorldX / currentWorldSize * 360.0 - 180.0;
+            double n = Math.PI - (2.0 * Math.PI * newCenterWorldY / currentWorldSize);
+            centerLat = 180.0 / Math.PI * Math.atan(Math.sinh(n));
+            
             invalidate();
         });
         zoomAnimator.start();
@@ -298,7 +334,6 @@ public class CanvasMapView extends View {
         moveAnimator.start();
     }
 
-    // 动态获取数据库
     private TileDatabase getCurrentDb() {
         if (mapSources == null || currentMapIndex >= mapSources.size()) return null;
         MapSource src = mapSources.get(currentMapIndex);
@@ -734,7 +769,8 @@ public class CanvasMapView extends View {
                 float moveDist = (float) Math.sqrt(Math.pow(midX - twoFingerStartX, 2) + Math.pow(midY - twoFingerStartY, 2));
                 if (moveDist < 50) {
                     float targetZoom = Math.max(3.0f, (float)Math.floor(zoom) - 1);
-                    animateZoom(targetZoom);
+                    // 核心：传入双指中心点
+                    animateZoom(targetZoom, midX, midY);
                 }
             }
             twoFingerDownTime = 0;
@@ -754,7 +790,8 @@ public class CanvasMapView extends View {
                 float moveDist = (float) Math.sqrt(dx * dx + dy * dy);
                 if (moveDist < 50) {
                     float targetZoom = Math.min(18.0f, (float)Math.ceil(zoom) + 1);
-                    animateZoom(targetZoom);
+                    // 核心：传入第一次点击的位置
+                    animateZoom(targetZoom, lastTapX, lastTapY);
                 }
                 lastTapTime = 0; 
             } else {
@@ -803,7 +840,6 @@ public class CanvasMapView extends View {
         if (downloadingKeys.contains(key)) return null;
         downloadingKeys.add(key);
         
-        // 核心：动态替换 URL 中的占位符
         String urlTemplate = mapSources.get(currentMapIndex).urlTemplate;
         final String urlStr = urlTemplate
                 .replace("{x}", String.valueOf(x))
