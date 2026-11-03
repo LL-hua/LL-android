@@ -6,6 +6,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.DashPathEffect;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.Rect;
@@ -22,6 +23,7 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -43,11 +45,16 @@ public class CanvasMapView extends View {
     private float lastX, lastY;
     private float lastDist = 0;
 
-    public static final int MAP_ROAD = 0;
-    public static final int MAP_SATELLITE = 1;
-    public static final int MAP_TOPO = 2;
-    public static final int MAP_OSM = 3;
-    private int currentMapType = MAP_ROAD;
+    // 手势相关变量
+    private long lastTapTime = 0;
+    private float lastTapX = 0, lastTapY = 0;
+    private long twoFingerDownTime = 0;
+    private float twoFingerStartX = 0, twoFingerStartY = 0;
+
+    // 动态图源相关
+    private List<MapSource> mapSources = new ArrayList<>();
+    private int currentMapIndex = 0;
+    private HashMap<String, TileDatabase> dbCache = new HashMap<>();
 
     private List<List<Object[]>> multiRoadData;
     private List<String> roadNames = null;
@@ -59,17 +66,12 @@ public class CanvasMapView extends View {
     private String gpsBStr = "--";
     private boolean hasGps = false;
     
-    private float gpsBearing = 0f; // 手机朝向（度）
+    private float gpsBearing = 0f;
 
     private ExecutorService executor = Executors.newFixedThreadPool(4);
     private Handler mainHandler = new Handler(Looper.getMainLooper());
     private LruCache<String, Bitmap> memoryCache;
     private java.util.HashSet<String> downloadingKeys = new java.util.HashSet<>();
-
-    private TileDatabase dbRoad;
-    private TileDatabase dbSat;
-    private TileDatabase dbTopo;
-    private TileDatabase dbOsm;
 
     private float scaleFactor = 2.0f;
 
@@ -77,6 +79,13 @@ public class CanvasMapView extends View {
     private final RectF dstRect = new RectF();
 
     private ValueAnimator moveAnimator;
+    private ValueAnimator zoomAnimator;
+
+    private final int[] palette = {
+            0xFF1E88E5, 0xFF43A047, 0xFFFB8C00, 0xFF8E24AA, 0xFF00ACC1,
+            0xFFD81B60, 0xFF6D4C41, 0xFF7CB342, 0xFF3949AB, 0xFF546E7A
+    };
+    private final int CURRENT_ROAD_COLOR = 0xFF0078D4;
 
     public CanvasMapView(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -124,18 +133,24 @@ public class CanvasMapView extends View {
                 return bitmap.getByteCount() / 1024;
             }
         };
-
-        Context ctx = getContext().getApplicationContext();
-        dbRoad = new TileDatabase(ctx, "hdm_road.mbtiles");
-        dbSat = new TileDatabase(ctx, "hdm_sat.mbtiles");
-        dbTopo = new TileDatabase(ctx, "hdm_topo.mbtiles");
-        dbOsm = new TileDatabase(ctx, "hdm_osm.mbtiles");
     }
 
-    public void setMapType(int type) {
-        this.currentMapType = type;
+    // ================= 新增：动态配置图源 =================
+    public void setMapSources(List<MapSource> sources) {
+        this.mapSources = sources;
+        if (sources != null && !sources.isEmpty()) {
+            setMapSourceIndex(0);
+        }
+    }
+
+    public void setMapSourceIndex(int index) {
+        if (mapSources == null || index < 0 || index >= mapSources.size()) return;
+        this.currentMapIndex = index;
         invalidate();
     }
+
+    public int getMapSourceIndex() { return currentMapIndex; }
+    public List<MapSource> getMapSources() { return mapSources; }
 
     public void setShowRoadNames(boolean show) {
         this.showRoadNames = show;
@@ -145,10 +160,6 @@ public class CanvasMapView extends View {
     public void setGpsBearing(float bearing) {
         this.gpsBearing = bearing;
         if (hasGps) invalidate();
-    }
-
-    public void setMultiRouteData(List<List<Object[]>> multiData) {
-        setMultiRouteData(multiData, null);
     }
 
     public void setMultiRouteData(List<List<Object[]>> multiData, List<String> names) {
@@ -170,11 +181,9 @@ public class CanvasMapView extends View {
 
     public void zoomToFitAll() {
         if (multiRoadData == null || multiRoadData.isEmpty()) return;
-
         double minLat = Double.MAX_VALUE, maxLat = -Double.MAX_VALUE;
         double minLng = Double.MAX_VALUE, maxLng = -Double.MAX_VALUE;
         boolean hasData = false;
-
         for (List<Object[]> route : multiRoadData) {
             for (Object[] pt : route) {
                 double lat = (Double) pt[0];
@@ -186,21 +195,13 @@ public class CanvasMapView extends View {
                 hasData = true;
             }
         }
-
-        if (hasData) {
-            animateToBounds(minLat, maxLat, minLng, maxLng);
-        }
+        if (hasData) animateToBounds(minLat, maxLat, minLng, maxLng);
     }
 
     private void fitToRoute(List<Object[]> route) {
-        if (route == null || route.isEmpty()) {
-            invalidate();
-            return;
-        }
-
+        if (route == null || route.isEmpty()) { invalidate(); return; }
         double minLat = Double.MAX_VALUE, maxLat = -Double.MAX_VALUE;
         double minLng = Double.MAX_VALUE, maxLng = -Double.MAX_VALUE;
-
         for (Object[] pt : route) {
             double lat = (Double) pt[0];
             double lng = (Double) pt[1];
@@ -209,14 +210,12 @@ public class CanvasMapView extends View {
             if (lng < minLng) minLng = lng;
             if (lng > maxLng) maxLng = lng;
         }
-
         animateToBounds(minLat, maxLat, minLng, maxLng);
     }
 
     private void animateToBounds(double minLat, double maxLat, double minLng, double maxLng) {
         double centerLatTarget = (minLat + maxLat) / 2.0;
         double centerLngTarget = (minLng + maxLng) / 2.0;
-
         float calculatedZoom = 15.0f;
         if (maxLat > minLat && maxLng > minLng) {
             int tileZoom = 15;
@@ -224,48 +223,51 @@ public class CanvasMapView extends View {
             double[] p2 = latLngToWorldPixel(minLat, maxLng, tileZoom);
             double w = Math.abs(p2[0] - p1[0]);
             double h = Math.abs(p1[1] - p2[1]);
-
             float screenWidth = getWidth();
             float screenHeight = getHeight();
             if (screenWidth == 0 || screenHeight == 0) {
                 screenWidth = getResources().getDisplayMetrics().widthPixels;
                 screenHeight = getResources().getDisplayMetrics().heightPixels;
             }
-
             double pixelW = screenWidth - 120;
             double pixelH = screenHeight - 120;
             if (pixelW < 100) pixelW = 100;
             if (pixelH < 100) pixelH = 100;
-
             float scaleX = (float) (pixelW / (w * scaleFactor));
             float scaleY = (float) (pixelH / (h * scaleFactor));
             float scale = Math.min(scaleX, scaleY);
-
             calculatedZoom = (float) (tileZoom + Math.log(scale) / Math.log(2));
             if (calculatedZoom < 3.0f) calculatedZoom = 3.0f;
             if (calculatedZoom > 18.0f) calculatedZoom = 18.0f;
             if (Float.isNaN(calculatedZoom)) calculatedZoom = 15.0f;
         }
-
         final float targetZoom = calculatedZoom;
-
         final double startLat = centerLat;
         final double startLng = centerLng;
         final float startZoom = zoom;
-
         if (moveAnimator != null) moveAnimator.cancel();
         moveAnimator = ValueAnimator.ofFloat(0f, 1f);
         moveAnimator.setDuration(600);
         moveAnimator.addUpdateListener(animation -> {
             float t = animation.getAnimatedFraction();
             float ease = 1 - (1 - t) * (1 - t);
-
             centerLat = startLat + (centerLatTarget - startLat) * ease;
             centerLng = startLng + (centerLngTarget - startLng) * ease;
             zoom = startZoom + (targetZoom - startZoom) * ease;
             invalidate();
         });
         moveAnimator.start();
+    }
+
+    private void animateZoom(final float targetZoom) {
+        if (zoomAnimator != null && zoomAnimator.isRunning()) return;
+        zoomAnimator = ValueAnimator.ofFloat(zoom, targetZoom);
+        zoomAnimator.setDuration(250);
+        zoomAnimator.addUpdateListener(animation -> {
+            zoom = (float) animation.getAnimatedValue();
+            invalidate();
+        });
+        zoomAnimator.start();
     }
 
     public void updateGps(double lat, double lng, String kStr, String bStr) {
@@ -279,18 +281,15 @@ public class CanvasMapView extends View {
 
     public void locateMe() {
         if (!hasGps) return;
-
         final double startLat = centerLat;
         final double startLng = centerLng;
         final float startZoom = zoom;
-
         if (moveAnimator != null) moveAnimator.cancel();
         moveAnimator = ValueAnimator.ofFloat(0f, 1f);
         moveAnimator.setDuration(600);
         moveAnimator.addUpdateListener(animation -> {
             float t = animation.getAnimatedFraction();
             float ease = 1 - (1 - t) * (1 - t);
-
             centerLat = startLat + (gpsLat - startLat) * ease;
             centerLng = startLng + (gpsLng - startLng) * ease;
             zoom = startZoom + (17.0f - startZoom) * ease;
@@ -299,11 +298,15 @@ public class CanvasMapView extends View {
         moveAnimator.start();
     }
 
+    // 动态获取数据库
     private TileDatabase getCurrentDb() {
-        if (currentMapType == MAP_SATELLITE) return dbSat;
-        if (currentMapType == MAP_TOPO) return dbTopo;
-        if (currentMapType == MAP_OSM) return dbOsm;
-        return dbRoad;
+        if (mapSources == null || currentMapIndex >= mapSources.size()) return null;
+        MapSource src = mapSources.get(currentMapIndex);
+        if (!dbCache.containsKey(src.dbName)) {
+            Context ctx = getContext().getApplicationContext();
+            dbCache.put(src.dbName, new TileDatabase(ctx, src.dbName));
+        }
+        return dbCache.get(src.dbName);
     }
 
     private double[] latLngToWorldPixel(double lat, double lng, float z) {
@@ -375,20 +378,16 @@ public class CanvasMapView extends View {
                     }
                 }
 
-                linePaint.setColor(0xFF888888);
-                linePaint.setStrokeWidth(4f);
+                linePaint.setColor(palette[r % palette.length]);
+                linePaint.setPathEffect(new DashPathEffect(new float[]{16f, 12f}, 0));
+                linePaint.setStrokeWidth(5f);
                 canvas.drawPath(path, linePaint);
 
                 if (showRoadNames && !screenPts.isEmpty()) {
                     int mi = screenPts.size() / 2;
                     float[] mid = screenPts.get(mi);
                     float angle = calcRoadAngle(screenPts, mi);
-                    roadLabels.add(new Object[]{
-                            Integer.valueOf(r),
-                            Float.valueOf(mid[0]),
-                            Float.valueOf(mid[1]),
-                            Float.valueOf(angle)
-                    });
+                    roadLabels.add(new Object[]{ Integer.valueOf(r), Float.valueOf(mid[0]), Float.valueOf(mid[1]), Float.valueOf(angle) });
                 }
             }
 
@@ -437,7 +436,8 @@ public class CanvasMapView extends View {
                     }
                 }
 
-                linePaint.setColor(Color.RED);
+                linePaint.setColor(CURRENT_ROAD_COLOR);
+                linePaint.setPathEffect(null); 
                 linePaint.setStrokeWidth(8f);
                 canvas.drawPath(path, linePaint);
 
@@ -445,17 +445,11 @@ public class CanvasMapView extends View {
                     int mi = screenPts.size() / 2;
                     float[] mid = screenPts.get(mi);
                     float angle = calcRoadAngle(screenPts, mi);
-                    roadLabels.add(new Object[]{
-                            Integer.valueOf(currentRoadIndex),
-                            Float.valueOf(mid[0]),
-                            Float.valueOf(mid[1]),
-                            Float.valueOf(angle)
-                    });
+                    roadLabels.add(new Object[]{ Integer.valueOf(currentRoadIndex), Float.valueOf(mid[0]), Float.valueOf(mid[1]), Float.valueOf(angle) });
                 }
             }
         }
 
-        // ================= 修正：方向与极度低调的箭头 =================
         if (hasGps) {
             double[] gpsWorld = latLngToWorldPixel(gpsLat, gpsLng, tileZoom);
             float gx = (float) (gpsWorld[0] - startX);
@@ -463,41 +457,35 @@ public class CanvasMapView extends View {
 
             canvas.save();
             canvas.translate(gx, gy);
-            
-            // 修正方向：去掉负号，让旋转方向与物理方向一致
             canvas.rotate(gpsBearing);
 
-            // 1. 画底部的白边蓝心圆点
             canvas.drawCircle(0, 0, 8, gpsStrokePaint); 
             canvas.drawCircle(0, 0, 6, gpsPaint);        
 
-            // 2. 画极简白色三角形（进一步缩小）
             Paint triPaint = new Paint();
-            triPaint.setColor(0xCCFFFFFF); // 半透明白
+            triPaint.setColor(0xCCFFFFFF);
             triPaint.setStyle(Paint.Style.FILL);
             triPaint.setAntiAlias(true);
             
             Paint triBorder = new Paint();
-            triBorder.setColor(0x33000000); // 极浅黑边
+            triBorder.setColor(0x33000000);
             triBorder.setStyle(Paint.Style.STROKE);
             triBorder.setStrokeWidth(1f); 
             triBorder.setAntiAlias(true);
 
             Path triPath = new Path();
-            triPath.moveTo(0, -10);   // 尖端高度缩小到 10
-            triPath.lineTo(-3.5f, -1); // 底部宽度缩小到 7
+            triPath.moveTo(0, -10);
+            triPath.lineTo(-3.5f, -1);
             triPath.lineTo(3.5f, -1);    
             triPath.close();
             
             canvas.drawPath(triPath, triPaint);
             canvas.drawPath(triPath, triBorder);
 
-            // 3. 画顶部的红点（极小）
             Paint redDotPaint = new Paint();
-            redDotPaint.setColor(0xAAE53935); // 淡红色
+            redDotPaint.setColor(0xAAFF5722);
             redDotPaint.setStyle(Paint.Style.FILL);
             redDotPaint.setAntiAlias(true);
-            
             canvas.drawCircle(0, -10, 2f, redDotPaint);
 
             canvas.restore();
@@ -505,12 +493,10 @@ public class CanvasMapView extends View {
 
         canvas.restore();
 
-        // 路名标注
         if (showRoadNames) {
             drawRoadNameLabels(canvas, width, height, roadLabels);
         }
 
-        // ====== 底部居中显示 GPS 信息框 ======
         if (hasGps) {
             Paint uiTextPaint = new Paint(textPaint);
             uiTextPaint.setTextSize(40f);
@@ -612,8 +598,8 @@ public class CanvasMapView extends View {
             if (name == null || name.isEmpty()) continue;
 
             boolean isCurrent = (r == currentRoadIndex);
-            namePaint.setColor(isCurrent ? 0xFFD32F2F : 0xFF444444);
-            nameBorder.setColor(isCurrent ? 0xFFD32F2F : 0xFF999999);
+            namePaint.setColor(isCurrent ? CURRENT_ROAD_COLOR : palette[r % palette.length]);
+            nameBorder.setColor(isCurrent ? CURRENT_ROAD_COLOR : palette[r % palette.length]);
 
             float textW = namePaint.measureText(name);
             float textSize = namePaint.getTextSize();
@@ -667,27 +653,38 @@ public class CanvasMapView extends View {
     }
 
     private Bitmap getTileDirect(int z, int x, int y) {
-        String key = currentMapType + "_" + z + "/" + x + "/" + y;
+        String key = currentMapIndex + "_" + z + "/" + x + "/" + y;
         return memoryCache.get(key);
     }
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
         int action = event.getActionMasked();
+        long currentTime = System.currentTimeMillis();
+
         if (action == MotionEvent.ACTION_DOWN) {
             lastX = event.getX();
             lastY = event.getY();
             if (moveAnimator != null) moveAnimator.cancel();
+            if (zoomAnimator != null) zoomAnimator.cancel();
             return true;
         }
+        
         if (action == MotionEvent.ACTION_POINTER_DOWN) {
-            if (event.getPointerCount() >= 2) lastDist = distance(event);
+            if (event.getPointerCount() >= 2) {
+                lastDist = distance(event);
+                twoFingerDownTime = currentTime;
+                twoFingerStartX = (event.getX(0) + event.getX(1)) / 2f;
+                twoFingerStartY = (event.getY(0) + event.getY(1)) / 2f;
+            }
             return true;
         }
+        
         if (action == MotionEvent.ACTION_MOVE) {
             if (event.getPointerCount() == 1) {
                 float dx = event.getX() - lastX;
                 float dy = event.getY() - lastY;
+                if (Math.abs(dx) > 20 || Math.abs(dy) > 20) lastTapTime = 0; 
                 double worldSize = 256 * Math.pow(2, zoom);
                 centerLng -= (dx / scaleFactor) / worldSize * 360.0;
                 double latRad = centerLat * Math.PI / 180.0;
@@ -696,37 +693,31 @@ public class CanvasMapView extends View {
                 lastY = event.getY();
                 invalidate();
             } else if (event.getPointerCount() >= 2) {
+                twoFingerDownTime = 0; 
                 float newDist = distance(event);
                 if (newDist > 10 && lastDist > 10) {
                     float scale = newDist / lastDist;
                     float nextZoom = zoom + (float) (Math.log(scale) / Math.log(2));
-
                     if (nextZoom >= 3.0f && nextZoom <= 18.0f) {
                         float midX = (event.getX(0) + event.getX(1)) / 2f;
                         float midY = (event.getY(0) + event.getY(1)) / 2f;
                         float dx = midX - getWidth() / 2f;
                         float dy = midY - getHeight() / 2f;
-
                         double worldSizeOld = 256 * Math.pow(2, zoom);
                         double worldSizeNew = 256 * Math.pow(2, nextZoom);
                         double ratio = worldSizeNew / worldSizeOld;
-
                         double cx = (centerLng + 180.0) / 360.0 * worldSizeOld;
                         double sinLat = Math.sin(centerLat * Math.PI / 180.0);
                         double cy = (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * worldSizeOld;
-
                         double tx = cx + dx / scaleFactor;
                         double ty = cy + dy / scaleFactor;
                         double newTx = tx * ratio;
                         double newTy = ty * ratio;
-
                         double newCx = newTx - dx / scaleFactor;
                         double newCy = newTy - dy / scaleFactor;
-
                         centerLng = newCx / worldSizeNew * 360.0 - 180.0;
                         double n = Math.PI - (2.0 * Math.PI * newCy / worldSizeNew);
                         centerLat = 180.0 / Math.PI * Math.atan(Math.sinh(n));
-
                         zoom = nextZoom;
                         invalidate();
                     }
@@ -737,6 +728,16 @@ public class CanvasMapView extends View {
         }
 
         if (action == MotionEvent.ACTION_POINTER_UP) {
+            if (twoFingerDownTime > 0 && currentTime - twoFingerDownTime < 300) {
+                float midX = (event.getX(0) + event.getX(1)) / 2f;
+                float midY = (event.getY(0) + event.getY(1)) / 2f;
+                float moveDist = (float) Math.sqrt(Math.pow(midX - twoFingerStartX, 2) + Math.pow(midY - twoFingerStartY, 2));
+                if (moveDist < 50) {
+                    float targetZoom = Math.max(3.0f, (float)Math.floor(zoom) - 1);
+                    animateZoom(targetZoom);
+                }
+            }
+            twoFingerDownTime = 0;
             int remainIdx = event.getActionIndex() == 0 ? 1 : 0;
             if (remainIdx < event.getPointerCount()) {
                 lastX = event.getX(remainIdx);
@@ -746,8 +747,29 @@ public class CanvasMapView extends View {
             return true;
         }
 
-        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+        if (action == MotionEvent.ACTION_UP) {
+            if (currentTime - lastTapTime < 300) {
+                float dx = event.getX() - lastTapX;
+                float dy = event.getY() - lastTapY;
+                float moveDist = (float) Math.sqrt(dx * dx + dy * dy);
+                if (moveDist < 50) {
+                    float targetZoom = Math.min(18.0f, (float)Math.ceil(zoom) + 1);
+                    animateZoom(targetZoom);
+                }
+                lastTapTime = 0; 
+            } else {
+                lastTapTime = currentTime;
+                lastTapX = event.getX();
+                lastTapY = event.getY();
+            }
             lastDist = 0;
+            return true;
+        }
+
+        if (action == MotionEvent.ACTION_CANCEL) {
+            lastDist = 0;
+            twoFingerDownTime = 0;
+            lastTapTime = 0;
             return true;
         }
         return super.onTouchEvent(event);
@@ -762,7 +784,7 @@ public class CanvasMapView extends View {
     private Bitmap getTile(int z, int x, int y) {
         int maxTile = (int) Math.pow(2, z) - 1;
         if (x < 0 || y < 0 || x > maxTile || y > maxTile) return null;
-        String key = currentMapType + "_" + z + "/" + x + "/" + y;
+        String key = currentMapIndex + "_" + z + "/" + x + "/" + y;
         Bitmap bmp = memoryCache.get(key);
         if (bmp != null) return bmp;
 
@@ -780,16 +802,16 @@ public class CanvasMapView extends View {
 
         if (downloadingKeys.contains(key)) return null;
         downloadingKeys.add(key);
-        final int reqType = currentMapType;
+        
+        // 核心：动态替换 URL 中的占位符
+        String urlTemplate = mapSources.get(currentMapIndex).urlTemplate;
+        final String urlStr = urlTemplate
+                .replace("{x}", String.valueOf(x))
+                .replace("{y}", String.valueOf(y))
+                .replace("{z}", String.valueOf(z));
 
         executor.execute(() -> {
             try {
-                String urlStr = "";
-                if (reqType == MAP_ROAD) urlStr = "https://mt1.google.com/vt/lyrs=r&hl=zh-CN&gl=cn&x=" + x + "&y=" + y + "&z=" + z;
-                else if (reqType == MAP_SATELLITE) urlStr = "https://mt1.google.com/vt/lyrs=y&hl=zh-CN&gl=cn&x=" + x + "&y=" + y + "&z=" + z;
-                else if (reqType == MAP_TOPO) urlStr = "https://a.tile.opentopomap.org/" + z + "/" + x + "/" + y + ".png";
-                else urlStr = "https://tile.openstreetmap.org/" + z + "/" + x + "/" + y + ".png";
-
                 URL url = new URL(urlStr);
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("GET");

@@ -16,6 +16,7 @@ import android.location.LocationListener;
 import android.location.LocationManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.provider.Settings;
 import android.text.Editable;
 import android.text.InputType;
@@ -30,6 +31,11 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -43,15 +49,12 @@ public class RealMapActivity extends BaseNavActivity {
     private LocationListener listener;
     private static final int REQ_LOCATION = 200;
 
-    // 传感器相关
     private SensorManager sensorManager;
     private Sensor rotationSensor;
-    
-    // 融合算法相关变量
-    private float currentAzimuth = 0f;       // 屏幕上最终显示的平滑角度
-    private float targetBearing = 0f;        // 目标角度（来源于传感器或GPS）
-    private float currentOffset = 180.0f;    // 用户自定义的校准偏移量
-    private long lastGpsBearingTime = 0L;    // 上一次收到有效GPS航向的时间
+    private float currentAzimuth = 0f;
+    private float targetBearing = 0f;
+    private float currentOffset = 180.0f;
+    private long lastGpsBearingTime = 0L;
     
     private EditText etOffset;
 
@@ -59,22 +62,16 @@ public class RealMapActivity extends BaseNavActivity {
     private int currentSelectedRoad = 0;
     private boolean isShowRoadNames = false;
     
-    // 持久化状态
-    private int currentMapTypeInt = CanvasMapView.MAP_ROAD; 
-    private String currentMapTypeName = "路网"; 
+    private String currentMapSourceName = "";
     private String lastSelectedRoadName = "主线";
 
     private AlertDialog settingsDialog; 
 
     @Override
-    protected String currentTab() {
-        return "realmap";
-    }
+    protected String currentTab() { return "realmap"; }
 
     @Override
-    protected String pageTitle() {
-        return "在线地图";
-    }
+    protected String pageTitle() { return "在线地图"; }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -85,7 +82,6 @@ public class RealMapActivity extends BaseNavActivity {
         content.setOrientation(LinearLayout.VERTICAL);
         setContent(content);
 
-        // 初始化传感器
         sensorManager = (SensorManager) getSystemService(SENSOR_SERVICE);
         if (sensorManager != null) {
             rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
@@ -108,14 +104,61 @@ public class RealMapActivity extends BaseNavActivity {
         return gd;
     }
 
+    // ================= 极简的两列读取逻辑 =================
+    private List<MapSource> loadMapSources() {
+        List<MapSource> sources = new ArrayList<>();
+        File sd = Environment.getExternalStorageDirectory();
+        File dir = new File(sd, "1hdm");
+        if (!dir.exists()) dir.mkdirs();
+        
+        File file = new File(dir, "maps.txt");
+        if (!file.exists()) {
+            // 默认只生成这4个老图源（严格两列）
+            String defaultTxt = "谷歌路网,https://mt1.google.com/vt/lyrs=r&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}\n" +
+                    "谷歌卫星,https://mt1.google.com/vt/lyrs=y&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}\n" +
+                    "地形图,https://a.tile.opentopomap.org/{z}/{x}/{y}.png\n" +
+                    "OSM,https://tile.openstreetmap.org/{z}/{x}/{y}.png\n";
+            try {
+                FileOutputStream fos = new FileOutputStream(file);
+                fos.write(defaultTxt.getBytes("UTF-8"));
+                fos.close();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+
+        try {
+            FileInputStream fis = new FileInputStream(file);
+            BufferedReader br = new BufferedReader(new InputStreamReader(fis, "UTF-8"));
+            String line;
+            while ((line = br.readLine()) != null) {
+                line = line.trim();
+                if (line.isEmpty() || line.startsWith("#")) continue;
+                String[] parts = line.split(",");
+                if (parts.length >= 2) {
+                    String name = parts[0].trim();
+                    String url = parts[1].trim();
+                    sources.add(new MapSource(name, url));
+                }
+            }
+            br.close();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        
+        if (sources.isEmpty()) {
+            sources.add(new MapSource("谷歌路网", "https://mt1.google.com/vt/lyrs=r&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}"));
+        }
+        
+        return sources;
+    }
+
     private void initUI() {
         content.removeAllViews();
 
-        // 读取持久化状态
         SharedPreferences sp = getSharedPreferences("hdm_config", MODE_PRIVATE);
-        currentMapTypeInt = sp.getInt("last_map_type", CanvasMapView.MAP_ROAD);
+        currentMapSourceName = sp.getString("last_map_source_name", "谷歌路网");
         currentOffset = sp.getFloat("compass_offset", 180.0f);
-        updateMapTypeName(currentMapTypeInt);
         
         String projName = (app != null && app.currentProjectName != null) ? app.currentProjectName : "default";
         String spRoadKey = "last_road_name_" + projName;
@@ -125,12 +168,24 @@ public class RealMapActivity extends BaseNavActivity {
         mapBox.setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT));
 
         mapView = new CanvasMapView(this, null);
-        mapView.setMapType(currentMapTypeInt);
+        
+        List<MapSource> sources = loadMapSources();
+        mapView.setMapSources(sources);
+        
+        int targetIdx = 0;
+        for (int i = 0; i < sources.size(); i++) {
+            if (sources.get(i).name.equals(currentMapSourceName)) {
+                targetIdx = i; break;
+            }
+        }
+        mapView.setMapSourceIndex(targetIdx);
+        currentMapSourceName = sources.get(targetIdx).name;
+
         mapBox.addView(mapView, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
         int fabSize = dp(48);
 
-        // 1. 左上角：菜单按钮 (☰)
+        // 1. 菜单
         TextView btnMenu = new TextView(this);
         btnMenu.setText("☰");
         btnMenu.setTextSize(24);
@@ -138,16 +193,12 @@ public class RealMapActivity extends BaseNavActivity {
         btnMenu.setBackground(makeRoundRectBg(0xF5FFFFFF, 8));
         btnMenu.setElevation(dp(4));
         btnMenu.setGravity(Gravity.CENTER);
-        
-        FrameLayout.LayoutParams lpMenu = new FrameLayout.LayoutParams(
-                fabSize, fabSize,
-                Gravity.TOP | Gravity.LEFT);
-        lpMenu.topMargin = dp(16);
-        lpMenu.leftMargin = dp(16);
+        FrameLayout.LayoutParams lpMenu = new FrameLayout.LayoutParams(fabSize, fabSize, Gravity.TOP | Gravity.LEFT);
+        lpMenu.topMargin = dp(16); lpMenu.leftMargin = dp(16);
         btnMenu.setLayoutParams(lpMenu);
         mapBox.addView(btnMenu);
 
-        // ================= 2. 右上角：方向校准输入框 =================
+        // 2. 校准框
         LinearLayout offsetLayout = new LinearLayout(this);
         offsetLayout.setOrientation(LinearLayout.HORIZONTAL);
         offsetLayout.setGravity(Gravity.CENTER_VERTICAL);
@@ -177,11 +228,8 @@ public class RealMapActivity extends BaseNavActivity {
         tvDegree.setTextColor(0xFF555555);
         offsetLayout.addView(tvDegree);
 
-        FrameLayout.LayoutParams lpOffset = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.TOP | Gravity.RIGHT);
-        lpOffset.topMargin = dp(16);
-        lpOffset.rightMargin = dp(16);
+        FrameLayout.LayoutParams lpOffset = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.RIGHT);
+        lpOffset.topMargin = dp(16); lpOffset.rightMargin = dp(16);
         offsetLayout.setLayoutParams(lpOffset);
         mapBox.addView(offsetLayout);
 
@@ -192,8 +240,7 @@ public class RealMapActivity extends BaseNavActivity {
                 try {
                     if (s.length() > 0 && !s.toString().equals("-") && !s.toString().equals(".")) {
                         currentOffset = Float.parseFloat(s.toString());
-                        getSharedPreferences("hdm_config", MODE_PRIVATE).edit()
-                                .putFloat("compass_offset", currentOffset).apply();
+                        getSharedPreferences("hdm_config", MODE_PRIVATE).edit().putFloat("compass_offset", currentOffset).apply();
                     }
                 } catch (Exception e) {}
             }
@@ -207,7 +254,7 @@ public class RealMapActivity extends BaseNavActivity {
             }
         });
 
-        // 3. 左下角：缩放全部 (FAB)
+        // 3. 缩放
         TextView btnFitAll = new TextView(this);
         btnFitAll.setText("⛶");
         btnFitAll.setTextSize(22);
@@ -215,16 +262,12 @@ public class RealMapActivity extends BaseNavActivity {
         btnFitAll.setBackground(makeRoundRectBg(0xF5FFFFFF, 24));
         btnFitAll.setElevation(dp(4));
         btnFitAll.setGravity(Gravity.CENTER);
-        
-        FrameLayout.LayoutParams lpFit = new FrameLayout.LayoutParams(
-                fabSize, fabSize,
-                Gravity.BOTTOM | Gravity.LEFT);
-        lpFit.bottomMargin = dp(24);
-        lpFit.leftMargin = dp(16);
+        FrameLayout.LayoutParams lpFit = new FrameLayout.LayoutParams(fabSize, fabSize, Gravity.BOTTOM | Gravity.LEFT);
+        lpFit.bottomMargin = dp(24); lpFit.leftMargin = dp(16);
         btnFitAll.setLayoutParams(lpFit);
         mapBox.addView(btnFitAll);
 
-        // 4. 右下角：一键定位 (FAB)
+        // 4. 定位
         TextView btnLocate = new TextView(this);
         btnLocate.setText("⌂");
         btnLocate.setTextSize(28);
@@ -232,24 +275,15 @@ public class RealMapActivity extends BaseNavActivity {
         btnLocate.setBackground(makeRoundRectBg(0xF5FFFFFF, 24));
         btnLocate.setElevation(dp(4));
         btnLocate.setGravity(Gravity.CENTER);
-        
-        FrameLayout.LayoutParams lpLoc = new FrameLayout.LayoutParams(
-                fabSize, fabSize,
-                Gravity.BOTTOM | Gravity.RIGHT);
-        lpLoc.bottomMargin = dp(24);
-        lpLoc.rightMargin = dp(16);
+        FrameLayout.LayoutParams lpLoc = new FrameLayout.LayoutParams(fabSize, fabSize, Gravity.BOTTOM | Gravity.RIGHT);
+        lpLoc.bottomMargin = dp(24); lpLoc.rightMargin = dp(16);
         btnLocate.setLayoutParams(lpLoc);
         mapBox.addView(btnLocate);
 
         content.addView(mapBox);
 
-        // ================= 事件绑定 =================
         btnMenu.setOnClickListener(v -> showSettingsDialog());
-
-        btnFitAll.setOnClickListener(v -> {
-            if (mapView != null) mapView.zoomToFitAll();
-        });
-
+        btnFitAll.setOnClickListener(v -> mapView.zoomToFitAll());
         btnLocate.setOnClickListener(v -> {
             if (lm != null && !lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
                 Toast.makeText(RealMapActivity.this, "请先打开手机的GPS定位服务", Toast.LENGTH_LONG).show();
@@ -259,69 +293,44 @@ public class RealMapActivity extends BaseNavActivity {
             }
         });
 
-        if (app.data != null) {
-            loadAllRoutes();
-        }
+        if (app.data != null) loadAllRoutes();
     }
 
-    // ================= 传感器回调：平滑滤波 =================
     private final SensorEventListener sensorListener = new SensorEventListener() {
         @Override
         public void onSensorChanged(SensorEvent event) {
             if (event.sensor.getType() == Sensor.TYPE_ROTATION_VECTOR) {
                 float[] rotationMatrix = new float[9];
                 SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values);
-                
                 float[] orientation = new float[3];
                 SensorManager.getOrientation(rotationMatrix, orientation);
-                
                 float azimuthRad = orientation[0];
                 float rawAzimuthDeg = (float) Math.toDegrees(azimuthRad);
-                if (rawAzimuthDeg < 0) {
-                    rawAzimuthDeg += 360;
-                }
+                if (rawAzimuthDeg < 0) rawAzimuthDeg += 360;
                 
-                // 应用校准偏移量
                 float sensorBearing = (rawAzimuthDeg + currentOffset) % 360f;
                 if (sensorBearing < 0) sensorBearing += 360f;
 
-                // 融合逻辑：如果超过 3 秒没有收到有效的 GPS 速度航向，才使用传感器的角度
                 if (System.currentTimeMillis() - lastGpsBearingTime > 3000) {
                     targetBearing = sensorBearing;
                 }
 
-                // 统一平滑处理（无论 targetBearing 来自 GPS 还是传感器，都要平滑）
                 float diff = targetBearing - currentAzimuth;
                 if (diff > 180) diff -= 360;
                 if (diff < -180) diff += 360;
-
-                // 由于 GPS 突变可能很大，稍微加大一点平滑系数让它追上去
-                float alpha = 0.15f; 
-                currentAzimuth = currentAzimuth + alpha * diff;
+                currentAzimuth = currentAzimuth + 0.15f * diff;
                 
                 if (currentAzimuth < 0) currentAzimuth += 360;
                 if (currentAzimuth >= 360) currentAzimuth -= 360;
-                
-                if (mapView != null) {
-                    mapView.setGpsBearing(currentAzimuth);
-                }
+                if (mapView != null) mapView.setGpsBearing(currentAzimuth);
             }
         }
-
         @Override
         public void onAccuracyChanged(Sensor sensor, int accuracy) {}
     };
 
-    private void updateMapTypeName(int type) {
-        if (type == CanvasMapView.MAP_ROAD) currentMapTypeName = "路网";
-        else if (type == CanvasMapView.MAP_SATELLITE) currentMapTypeName = "卫星";
-        else if (type == CanvasMapView.MAP_TOPO) currentMapTypeName = "地形";
-        else if (type == CanvasMapView.MAP_OSM) currentMapTypeName = "OSM";
-    }
-
     private void showSettingsDialog() {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        
         ScrollView scrollView = new ScrollView(this);
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
@@ -367,55 +376,56 @@ public class RealMapActivity extends BaseNavActivity {
         layout.addView(line1, lpLine);
         
         TextView tvMapTypeTitle = new TextView(this);
-        tvMapTypeTitle.setText("地图图源");
+        tvMapTypeTitle.setText("地图图源 (可修改 1hdm/maps.txt 扩充)");
         tvMapTypeTitle.setTextSize(16);
         tvMapTypeTitle.setTextColor(0xFF333333);
         tvMapTypeTitle.setTypeface(null, android.graphics.Typeface.BOLD);
         layout.addView(tvMapTypeTitle);
         
-        String[] mapTypes = {"路网", "卫星", "地形", "OSM"};
-        final int[] mapTypeValues = {
-                CanvasMapView.MAP_ROAD, 
-                CanvasMapView.MAP_SATELLITE, 
-                CanvasMapView.MAP_TOPO, 
-                CanvasMapView.MAP_OSM
-        };
+        final List<MapSource> sources = mapView.getMapSources();
+        final List<TextView> mapTypeBtns = new ArrayList<>();
+        
         LinearLayout mapTypeLayout = new LinearLayout(this);
         mapTypeLayout.setOrientation(LinearLayout.HORIZONTAL);
         mapTypeLayout.setPadding(0, dp(12), 0, dp(16));
         
-        final TextView[] mapTypeBtns = new TextView[4];
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < sources.size(); i++) {
             final int index = i;
+            MapSource src = sources.get(i);
+            
+            if (i > 0 && i % 3 == 0) {
+                layout.addView(mapTypeLayout);
+                mapTypeLayout = new LinearLayout(this);
+                mapTypeLayout.setOrientation(LinearLayout.HORIZONTAL);
+                mapTypeLayout.setPadding(0, 0, 0, dp(12));
+            }
+            
             TextView btn = new TextView(this);
-            btn.setText(mapTypes[i]);
+            btn.setText(src.name);
             btn.setTextSize(14);
             btn.setGravity(Gravity.CENTER);
-            boolean isSelected = (currentMapTypeInt == mapTypeValues[i]);
+            boolean isSelected = mapView.getMapSourceIndex() == i;
             btn.setTextColor(isSelected ? Color.WHITE : 0xFF555555);
             btn.setBackground(makeRoundRectBg(isSelected ? 0xFF0078D4 : 0xFFF0F0F0, 16));
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-            if (i > 0) lp.leftMargin = dp(8);
+            if (i % 3 != 0) lp.leftMargin = dp(8);
             btn.setLayoutParams(lp);
             btn.setPadding(0, dp(8), 0, dp(8));
             
             btn.setOnClickListener(v -> {
                 if (mapView == null) return;
-                currentMapTypeInt = mapTypeValues[index];
-                updateMapTypeName(currentMapTypeInt);
-                
-                mapView.setMapType(currentMapTypeInt);
-                
+                mapView.setMapSourceIndex(index);
+                currentMapSourceName = src.name;
                 getSharedPreferences("hdm_config", MODE_PRIVATE).edit()
-                        .putInt("last_map_type", currentMapTypeInt).apply();
+                        .putString("last_map_source_name", currentMapSourceName).apply();
                 
-                for (int j = 0; j < 4; j++) {
-                    boolean sel = (currentMapTypeInt == mapTypeValues[j]);
-                    mapTypeBtns[j].setTextColor(sel ? Color.WHITE : 0xFF555555);
-                    mapTypeBtns[j].setBackground(makeRoundRectBg(sel ? 0xFF0078D4 : 0xFFF0F0F0, 16));
+                for (int j = 0; j < mapTypeBtns.size(); j++) {
+                    boolean sel = (mapView.getMapSourceIndex() == j);
+                    mapTypeBtns.get(j).setTextColor(sel ? Color.WHITE : 0xFF555555);
+                    mapTypeBtns.get(j).setBackground(makeRoundRectBg(sel ? 0xFF0078D4 : 0xFFF0F0F0, 16));
                 }
             });
-            mapTypeBtns[i] = btn;
+            mapTypeBtns.add(btn);
             mapTypeLayout.addView(btn);
         }
         layout.addView(mapTypeLayout);
@@ -449,9 +459,7 @@ public class RealMapActivity extends BaseNavActivity {
                 btnRoute.setTextSize(16);
                 btnRoute.setTextColor(isSelected ? 0xFF0078D4 : 0xFF333333);
                 btnRoute.setPadding(dp(12), dp(12), dp(12), dp(12));
-                if (isSelected) {
-                    btnRoute.setBackground(makeRoundRectBg(0x1A0078D4, 8)); 
-                }
+                if (isSelected) btnRoute.setBackground(makeRoundRectBg(0x1A0078D4, 8)); 
                 
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
                 lp.topMargin = dp(4);
@@ -463,9 +471,7 @@ public class RealMapActivity extends BaseNavActivity {
                     
                     String projName = (app != null && app.currentProjectName != null) ? app.currentProjectName : "default";
                     String spRoadKey = "last_road_name_" + projName;
-                    
-                    getSharedPreferences("hdm_config", MODE_PRIVATE).edit()
-                            .putString(spRoadKey, lastSelectedRoadName).apply();
+                    getSharedPreferences("hdm_config", MODE_PRIVATE).edit().putString(spRoadKey, lastSelectedRoadName).apply();
 
                     if (mapView != null) mapView.switchRoad(index);
                     if (settingsDialog != null) settingsDialog.dismiss();
@@ -491,14 +497,11 @@ public class RealMapActivity extends BaseNavActivity {
             MapRoadData mainRoad = new MapRoadData("主线", app.data.pqx);
             allRoadsList.add(mainRoad);
 
-            if (app.data.extraRoads != null) {
-                allRoadsList.addAll(app.data.extraRoads);
-            }
+            if (app.data.extraRoads != null) allRoadsList.addAll(app.data.extraRoads);
 
             double[][] lonlat = app.data.controlLonLat;
             double[][] xy = app.data.controlXy;
-            if (lonlat == null || xy == null || lonlat.length == 0 || lonlat.length != xy.length)
-                return;
+            if (lonlat == null || xy == null || lonlat.length == 0 || lonlat.length != xy.length) return;
 
             double[] sourceXY = new double[lonlat.length * 2];
             double[] targetXY = new double[lonlat.length * 2];
@@ -509,8 +512,7 @@ public class RealMapActivity extends BaseNavActivity {
             boolean isUtm = app.data.projection.toLowerCase().contains("utm");
 
             for (int i = 0; i < lonlat.length; i++) {
-                double[] projected = isUtm ? Projection.utm_proj(lonlat[i][0], lonlat[i][
-                        1]) : Projection.gauss_proj(lonlat[i][0], lonlat[i][1], center);
+                double[] projected = isUtm ? Projection.utm_proj(lonlat[i][0], lonlat[i][1]) : Projection.gauss_proj(lonlat[i][0], lonlat[i][1], center);
                 sourceXY[i * 2] = projected[0];
                 sourceXY[i * 2 + 1] = projected[1];
                 targetXY[i * 2] = xy[i][0];
@@ -528,10 +530,8 @@ public class RealMapActivity extends BaseNavActivity {
 
                 for (int i = 0; i < route.size(); i++) {
                     double[] pt = route.get(i);
-                    double[] lsxy = Projection.fourParameterTransform(pt[1], pt[2], cs4[0], cs4[
-                            1], cs4[2], cs4[3]);
-                    double[] lb = isUtm ? Projection.utm_unproj(lsxy[0], lsxy[
-                            1], north, zone) : Projection.gauss_unproj(lsxy[0], lsxy[1], center);
+                    double[] lsxy = Projection.fourParameterTransform(pt[1], pt[2], cs4[0], cs4[1], cs4[2], cs4[3]);
+                    double[] lb = isUtm ? Projection.utm_unproj(lsxy[0], lsxy[1], north, zone) : Projection.gauss_unproj(lsxy[0], lsxy[1], center);
 
                     double lon = lb[0];
                     double lat = lb[1];
@@ -555,10 +555,7 @@ public class RealMapActivity extends BaseNavActivity {
             }
             currentSelectedRoad = targetIndex;
             lastSelectedRoadName = allRoadsList.get(currentSelectedRoad).name;
-            
-            if (targetIndex != 0) {
-                mapView.switchRoad(targetIndex);
-            }
+            if (targetIndex != 0) mapView.switchRoad(targetIndex);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -581,9 +578,6 @@ public class RealMapActivity extends BaseNavActivity {
                 final double lon = loc.getLongitude();
                 final double lat = loc.getLatitude();
 
-                // ================= 核心融合逻辑：优先使用 GPS 航向 =================
-                // loc.hasBearing() 表示 GPS 芯片算出了移动方向
-                // loc.getSpeed() 的速度大于 1.2m/s（约 4.3km/h，快步走的速度）时，方向才可靠
                 if (loc.hasBearing() && loc.getSpeed() > 1.2f) {
                     targetBearing = loc.getBearing();
                     lastGpsBearingTime = System.currentTimeMillis();
@@ -598,8 +592,7 @@ public class RealMapActivity extends BaseNavActivity {
 
                     double[] kb = LL.hua_Fs(currentRoad.pqx, xy[0], xy[1]);
                     String stationStr = kb[0] < 0 ? "超出范围" : LL.hua_Num2K(kb[0]);
-                    String offsetStr = kb[0] < 0 ? "--" : String.format("%.3f m (%s)", Math.abs(kb[
-                            1]), kb[1] < 0 ? "左" : "右");
+                    String offsetStr = kb[0] < 0 ? "--" : String.format("%.3f m (%s)", Math.abs(kb[1]), kb[1] < 0 ? "左" : "右");
 
                     mapView.updateGps(lat, lon, stationStr, offsetStr);
                 });
@@ -610,37 +603,27 @@ public class RealMapActivity extends BaseNavActivity {
 
             @Override
             public void onProviderEnabled(String provider) {
-                try {
-                    lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000, 0, listener);
-                } catch (Exception e) {
-                }
+                try { lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000, 0, listener); } catch (Exception e) {}
             }
 
             @Override
             public void onProviderDisabled(String provider) {}
         };
 
-        try {
-            lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000, 0, listener);
-        } catch (Exception e) {
-        }
+        try { lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000, 0, listener); } catch (Exception e) {}
     }
 
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == REQ_LOCATION && grantResults.length > 0 && grantResults[
-                0] == PackageManager.PERMISSION_GRANTED) startGps();
+        if (requestCode == REQ_LOCATION && grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) startGps();
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
         if (lm != null && listener != null) {
-            try {
-                lm.removeUpdates(listener);
-            } catch (Exception e) {
-            }
+            try { lm.removeUpdates(listener); } catch (Exception e) {}
         }
     }
 
@@ -648,12 +631,8 @@ public class RealMapActivity extends BaseNavActivity {
     protected void onResume() {
         super.onResume();
         if (lm != null && listener != null) {
-            try {
-                lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000, 0, listener);
-            } catch (Exception e) {
-            }
+            try { lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000, 0, listener); } catch (Exception e) {}
         }
-        // 恢复传感器监听
         if (sensorManager != null && rotationSensor != null) {
             sensorManager.registerListener(sensorListener, rotationSensor, SensorManager.SENSOR_DELAY_GAME);
         }
@@ -662,9 +641,6 @@ public class RealMapActivity extends BaseNavActivity {
     @Override
     protected void onPause() {
         super.onPause();
-        // 暂停传感器以省电
-        if (sensorManager != null) {
-            sensorManager.unregisterListener(sensorListener);
-        }
+        if (sensorManager != null) sensorManager.unregisterListener(sensorListener);
     }
 }
