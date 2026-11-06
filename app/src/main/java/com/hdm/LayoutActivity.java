@@ -55,8 +55,10 @@ public class LayoutActivity extends BaseNavActivity {
             return;
         }
 
+        // ================= 输入区 =================
         LinearLayout inputRow = new LinearLayout(this);
         inputRow.setOrientation(LinearLayout.HORIZONTAL);
+        inputRow.setGravity(Gravity.CENTER_VERTICAL);
 
         etX = new EditText(this); etX.setHint("X");
         etX.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
@@ -70,14 +72,32 @@ public class LayoutActivity extends BaseNavActivity {
         etZ.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         inputRow.addView(etZ);
 
-        Button btnCalc = new Button(this); btnCalc.setText("放样");
+        // 新增：RTK 按钮
+        Button btnRtk = new Button(this);
+        btnRtk.setText("RTK");
+        btnRtk.setTextSize(12);
+        btnRtk.setPadding(dp(8), 0, dp(8), 0);
+        btnRtk.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        inputRow.addView(btnRtk);
+
+        // 原有：计算按钮
+        Button btnCalc = new Button(this); 
+        btnCalc.setText("放样");
+        btnCalc.setPadding(dp(8), 0, dp(8), 0);
+        btnCalc.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         inputRow.addView(btnCalc);
+        
         content.addView(inputRow);
 
-        tvResult = new TextView(this); tvResult.setTextSize(14);
-        tvResult.setText("输入实测点，点\"放样\"");
+        tvResult = new TextView(this); 
+        tvResult.setTextSize(14);
+        tvResult.setText("输入实测点，点\"放样\"\n也可连接 RTK 后直接点击 \"RTK\" 按钮获取");
+        tvResult.setPadding(0, dp(10), 0, dp(10));
         content.addView(tvResult);
 
+        // ================= 图形区 =================
         FrameLayout chartBox = new FrameLayout(this);
         chartBox.setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
@@ -97,6 +117,7 @@ public class LayoutActivity extends BaseNavActivity {
         btnReset.setLayoutParams(lpReset); chartBox.addView(btnReset);
         content.addView(chartBox);
 
+        // ================= 事件绑定 =================
         btnReset.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { sectionView.resetView(); }
         });
@@ -111,6 +132,38 @@ public class LayoutActivity extends BaseNavActivity {
                 } catch (Exception e) {
                     Toast.makeText(LayoutActivity.this, "输入格式错误", Toast.LENGTH_SHORT).show();
                 }
+            }
+        });
+
+        // 新增：RTK 获取逻辑
+        btnRtk.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                MyApp app = (MyApp) getApplication();
+                if (!app.hasRtkData || app.currentRtkFix == 0) {
+                    Toast.makeText(LayoutActivity.this, "未收到 RTK 信号，请先在地图页面连接 RTK", Toast.LENGTH_LONG).show();
+                    return;
+                }
+
+                // 将 RTK 的经纬度转换成工程坐标
+                double[] xy = Projection.gps2Xy(app.currentRtkLon, app.currentRtkLat, 
+                        app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
+                
+                if (xy == null || xy.length < 2) {
+                    Toast.makeText(LayoutActivity.this, "坐标转换失败，请检查控制点配置", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+
+                // 填入输入框
+                etX.setText(String.format("%.3f", xy[0]));
+                etY.setText(String.format("%.3f", xy[1]));
+                etZ.setText(String.format("%.3f", app.currentRtkAlt)); // 暂用 RTK 椭球高，视工程需求可加高程异常改正
+
+                // 自动触发计算
+                doLayout(xy[0], xy[1], app.currentRtkAlt);
+                
+                String fixStr = app.currentRtkFix == 4 ? "固定解" : "浮点解";
+                Toast.makeText(LayoutActivity.this, "已获取 RTK " + fixStr + " 坐标", Toast.LENGTH_SHORT).show();
             }
         });
     }

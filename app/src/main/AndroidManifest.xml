@@ -8,6 +8,12 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <!-- 蓝牙基础权限 -->
+<uses-permission android:name="android.permission.BLUETOOTH" />
+<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+<!-- Android 12+ 必须的蓝牙权限 -->
+<uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
+<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
     <application
         android:name=".MyApp"
@@ -27,5 +33,6 @@
         <activity android:name=".CalcActivity" android:exported="false" />
         <activity android:name=".LayoutActivity" android:exported="false" />
         <activity android:name=".EarthworkActivity" android:exported="false" />
+      
     </application>
 </manifest>

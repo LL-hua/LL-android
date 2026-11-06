@@ -2,6 +2,8 @@ package com.hdm;
 
 import android.Manifest;
 import android.app.AlertDialog;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -38,6 +40,7 @@ import java.io.FileOutputStream;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 public class RealMapActivity extends BaseNavActivity {
 
@@ -48,6 +51,7 @@ public class RealMapActivity extends BaseNavActivity {
     private LocationManager lm;
     private LocationListener listener;
     private static final int REQ_LOCATION = 200;
+    private static final int REQ_BLUETOOTH = 201; // 新增蓝牙权限请求码
 
     private SensorManager sensorManager;
     private Sensor rotationSensor;
@@ -66,6 +70,10 @@ public class RealMapActivity extends BaseNavActivity {
     private String lastSelectedRoadName = "主线";
 
     private AlertDialog settingsDialog; 
+    
+    // RTK 状态
+    private String rtkStatus = "未连接";
+    private TextView tvRtkStatus;
 
     @Override
     protected String currentTab() { return "realmap"; }
@@ -89,12 +97,61 @@ public class RealMapActivity extends BaseNavActivity {
 
         initUI();
         startGps();
+        setupRtk();
     }
 
     @Override
     protected void onProjectLoaded() {
         initUI();
         if (lm != null && listener == null) startGps();
+    }
+
+    // ================= 初始化 RTK 回调 =================
+    private void setupRtk() {
+        app.rtkManager.setCallback(new BluetoothRtkManager.RtkCallback() {
+            @Override
+            public void onRtkData(double lat, double lon, double alt, int fixQuality) {
+                app.currentRtkLat = lat;
+                app.currentRtkLon = lon;
+                app.currentRtkAlt = alt;
+                app.currentRtkFix = fixQuality;
+                app.hasRtkData = true;
+
+                String fixStr = fixQuality == 4 ? "固定解" : (fixQuality == 5 ? "浮点解" : "单点");
+                rtkStatus = "RTK " + fixStr;
+                if (tvRtkStatus != null) tvRtkStatus.setText(rtkStatus);
+
+                // 用 RTK 的坐标更新地图
+                updateMapLocation(lat, lon);
+            }
+
+            @Override
+            public void onRtkStatus(String status) {
+                rtkStatus = status;
+                if (tvRtkStatus != null) tvRtkStatus.setText(rtkStatus);
+            }
+        });
+    }
+
+    // 解析并更新地图 UI 的核心逻辑抽离
+    private void updateMapLocation(double lat, double lon) {
+        if (app.data == null || allRoadsList.isEmpty() || mapView == null) return;
+        
+        MapRoadData currentRoad = allRoadsList.get(currentSelectedRoad);
+
+        double[] xy = Projection.gps2Xy(lon, lat, app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
+        if (xy == null || xy.length < 2) return;
+
+        double[] kb = LL.hua_Fs(currentRoad.pqx, xy[0], xy[1]);
+        String stationStr = kb[0] < 0 ? "超出范围" : LL.hua_Num2K(kb[0]);
+        String offsetStr = kb[0] < 0 ? "--" : String.format("%.3f m (%s)", Math.abs(kb[1]), kb[1] < 0 ? "左" : "右");
+
+        // 叠加 RTK 状态显示
+        if (app.hasRtkData && app.currentRtkFix > 0) {
+            stationStr += " [RTK]";
+        }
+
+        mapView.updateGps(lat, lon, stationStr, offsetStr);
     }
 
     private GradientDrawable makeRoundRectBg(int color, float radiusDp) {
@@ -104,7 +161,6 @@ public class RealMapActivity extends BaseNavActivity {
         return gd;
     }
 
-    // ================= 极简的两列读取逻辑 =================
     private List<MapSource> loadMapSources() {
         List<MapSource> sources = new ArrayList<>();
         File sd = Environment.getExternalStorageDirectory();
@@ -113,7 +169,6 @@ public class RealMapActivity extends BaseNavActivity {
         
         File file = new File(dir, "maps.txt");
         if (!file.exists()) {
-            // 默认只生成这4个老图源（严格两列）
             String defaultTxt = "谷歌路网,https://mt1.google.com/vt/lyrs=r&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}\n" +
                     "谷歌卫星,https://mt1.google.com/vt/lyrs=y&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}\n" +
                     "地形图,https://a.tile.opentopomap.org/{z}/{x}/{y}.png\n" +
@@ -185,7 +240,6 @@ public class RealMapActivity extends BaseNavActivity {
 
         int fabSize = dp(48);
 
-        // 1. 菜单
         TextView btnMenu = new TextView(this);
         btnMenu.setText("☰");
         btnMenu.setTextSize(24);
@@ -198,7 +252,18 @@ public class RealMapActivity extends BaseNavActivity {
         btnMenu.setLayoutParams(lpMenu);
         mapBox.addView(btnMenu);
 
-        // 2. 校准框
+        // ====== RTK 状态显示框 ======
+        tvRtkStatus = new TextView(this);
+        tvRtkStatus.setText(rtkStatus);
+        tvRtkStatus.setTextSize(12);
+        tvRtkStatus.setTextColor(0xFF555555);
+        tvRtkStatus.setBackground(makeRoundRectBg(0xE0FFFFFF, 8));
+        tvRtkStatus.setPadding(dp(12), dp(6), dp(12), dp(6));
+        FrameLayout.LayoutParams lpRtk = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        lpRtk.topMargin = dp(16);
+        tvRtkStatus.setLayoutParams(lpRtk);
+        mapBox.addView(tvRtkStatus);
+
         LinearLayout offsetLayout = new LinearLayout(this);
         offsetLayout.setOrientation(LinearLayout.HORIZONTAL);
         offsetLayout.setGravity(Gravity.CENTER_VERTICAL);
@@ -254,7 +319,6 @@ public class RealMapActivity extends BaseNavActivity {
             }
         });
 
-        // 3. 缩放
         TextView btnFitAll = new TextView(this);
         btnFitAll.setText("⛶");
         btnFitAll.setTextSize(22);
@@ -267,7 +331,6 @@ public class RealMapActivity extends BaseNavActivity {
         btnFitAll.setLayoutParams(lpFit);
         mapBox.addView(btnFitAll);
 
-        // 4. 定位
         TextView btnLocate = new TextView(this);
         btnLocate.setText("⌂");
         btnLocate.setTextSize(28);
@@ -342,6 +405,19 @@ public class RealMapActivity extends BaseNavActivity {
         title.setTypeface(null, android.graphics.Typeface.BOLD);
         title.setTextColor(0xFF333333);
         layout.addView(title);
+
+        // ================= 蓝牙 RTK 连接 =================
+        TextView btnRtk = new TextView(this);
+        btnRtk.setText("连接蓝牙 RTK (当前: " + rtkStatus + ")");
+        btnRtk.setTextSize(16);
+        btnRtk.setTextColor(0xFF0078D4);
+        btnRtk.setPadding(0, dp(16), 0, dp(16));
+        btnRtk.setOnClickListener(v -> checkAndRequestBluetooth());
+        layout.addView(btnRtk);
+        
+        View line0 = new View(this);
+        line0.setBackgroundColor(0xFFEEEEEE);
+        layout.addView(line0, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
         
         LinearLayout rowName = new LinearLayout(this);
         rowName.setOrientation(LinearLayout.HORIZONTAL);
@@ -487,6 +563,64 @@ public class RealMapActivity extends BaseNavActivity {
         settingsDialog.show();
     }
 
+    // ================= 动态申请蓝牙权限 =================
+    private void checkAndRequestBluetooth() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED ||
+                checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{
+                        Manifest.permission.BLUETOOTH_SCAN,
+                        Manifest.permission.BLUETOOTH_CONNECT
+                }, REQ_BLUETOOTH);
+                return;
+            }
+        }
+        showRtkDeviceDialog();
+    }
+
+    // ================= 扫描并连接蓝牙设备 =================
+    private void showRtkDeviceDialog() {
+        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+        if (adapter == null) {
+            Toast.makeText(this, "设备不支持蓝牙", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!adapter.isEnabled()) {
+            Toast.makeText(this, "请先打开手机蓝牙", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        try {
+            // 获取已配对设备
+            Set<BluetoothDevice> pairedDevices = adapter.getBondedDevices();
+            List<String> deviceNames = new ArrayList<>();
+            List<BluetoothDevice> devices = new ArrayList<>();
+
+            deviceNames.add("断开连接");
+            devices.add(null);
+
+            for (BluetoothDevice device : pairedDevices) {
+                deviceNames.add(device.getName() + "\n" + device.getAddress());
+                devices.add(device);
+            }
+
+            new AlertDialog.Builder(this)
+                    .setTitle("选择 RTK 蓝牙设备 (需先在系统蓝牙中配对)")
+                    .setItems(deviceNames.toArray(new String[0]), (dialog, which) -> {
+                        if (which == 0) {
+                            app.rtkManager.disconnect();
+                            rtkStatus = "未连接";
+                            if (tvRtkStatus != null) tvRtkStatus.setText(rtkStatus);
+                        } else {
+                            app.rtkManager.connect(devices.get(which));
+                        }
+                    })
+                    .show();
+        } catch (SecurityException e) {
+            Toast.makeText(this, "缺少蓝牙权限，请检查系统设置", Toast.LENGTH_SHORT).show();
+        }
+    }
+
     private void loadAllRoutes() {
         if (mapView == null) return;
         try {
@@ -575,27 +709,17 @@ public class RealMapActivity extends BaseNavActivity {
         listener = new LocationListener() {
             @Override
             public void onLocationChanged(Location loc) {
-                final double lon = loc.getLongitude();
-                final double lat = loc.getLatitude();
+                // 如果没有 RTK 数据，才使用手机自带 GPS
+                if (!app.hasRtkData || app.currentRtkFix == 0) {
+                    final double lon = loc.getLongitude();
+                    final double lat = loc.getLatitude();
+                    updateMapLocation(lat, lon);
 
-                if (loc.hasBearing() && loc.getSpeed() > 1.2f) {
-                    targetBearing = loc.getBearing();
-                    lastGpsBearingTime = System.currentTimeMillis();
+                    if (loc.hasBearing() && loc.getSpeed() > 1.2f) {
+                        targetBearing = loc.getBearing();
+                        lastGpsBearingTime = System.currentTimeMillis();
+                    }
                 }
-
-                runOnUiThread(() -> {
-                    if (app.data == null || allRoadsList.isEmpty()) return;
-                    MapRoadData currentRoad = allRoadsList.get(currentSelectedRoad);
-
-                    double[] xy = Projection.gps2Xy(lon, lat, app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
-                    if (xy == null || xy.length < 2) return;
-
-                    double[] kb = LL.hua_Fs(currentRoad.pqx, xy[0], xy[1]);
-                    String stationStr = kb[0] < 0 ? "超出范围" : LL.hua_Num2K(kb[0]);
-                    String offsetStr = kb[0] < 0 ? "--" : String.format("%.3f m (%s)", Math.abs(kb[1]), kb[1] < 0 ? "左" : "右");
-
-                    mapView.updateGps(lat, lon, stationStr, offsetStr);
-                });
             }
 
             @Override
@@ -616,7 +740,15 @@ public class RealMapActivity extends BaseNavActivity {
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == REQ_LOCATION && grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) startGps();
+        if (requestCode == REQ_LOCATION) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) startGps();
+        } else if (requestCode == REQ_BLUETOOTH) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                showRtkDeviceDialog();
+            } else {
+                Toast.makeText(this, "需要蓝牙权限才能连接 RTK", Toast.LENGTH_SHORT).show();
+            }
+        }
     }
 
     @Override
