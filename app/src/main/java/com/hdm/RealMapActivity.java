@@ -59,30 +59,27 @@ public class RealMapActivity extends BaseNavActivity {
     private float targetBearing = 0f;
     private float currentOffset = 180.0f;
     private long lastGpsBearingTime = 0L;
-
+    
     private EditText etOffset;
 
     private List<MapRoadData> allRoadsList = new ArrayList<>();
     private int currentSelectedRoad = 0;
     private boolean isShowRoadNames = false;
-
+    private boolean isShowControlPoints = false; // 新增：是否显示控制点
+    
     private String currentMapSourceName = "";
     private String lastSelectedRoadName = "主线";
 
-    private AlertDialog settingsDialog;
-
+    private AlertDialog settingsDialog; 
+    
     private String rtkStatus = "未连接";
     private TextView tvRtkStatus;
 
     @Override
-    protected String currentTab() {
-        return "realmap";
-    }
+    protected String currentTab() { return "realmap"; }
 
     @Override
-    protected String pageTitle() {
-        return "在线地图";
-    }
+    protected String pageTitle() { return "在线地图"; }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -143,7 +140,7 @@ public class RealMapActivity extends BaseNavActivity {
 
     private void updateMapLocation(double lat, double lon) {
         if (app.data == null || allRoadsList.isEmpty() || mapView == null) return;
-
+        
         MapRoadData currentRoad = allRoadsList.get(currentSelectedRoad);
 
         double[] xy = Projection.gps2Xy(lon, lat, app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
@@ -156,8 +153,7 @@ public class RealMapActivity extends BaseNavActivity {
 
         double[] kb = LL.hua_Fs(currentRoad.pqx, xy[0], xy[1]);
         String stationStr = kb[0] < 0 ? "超出范围" : LL.hua_Num2K(kb[0]);
-        String offsetStr = kb[0] < 0 ? "--" : String.format("%.3f m (%s)", Math.abs(kb[1]), kb[
-                                1] < 0 ? "左" : "右");
+        String offsetStr = kb[0] < 0 ? "--" : String.format("%.3f m (%s)", Math.abs(kb[1]), kb[1] < 0 ? "左" : "右");
 
         if (app.hasRtkData && app.currentRtkFix > 0) {
             stationStr += " [RTK]";
@@ -178,7 +174,7 @@ public class RealMapActivity extends BaseNavActivity {
         File sd = Environment.getExternalStorageDirectory();
         File dir = new File(sd, "1hdm");
         if (!dir.exists()) dir.mkdirs();
-
+        
         File file = new File(dir, "maps.txt");
         if (!file.exists()) {
             String defaultTxt = "谷歌路网,https://mt1.google.com/vt/lyrs=r&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}\n" +
@@ -189,8 +185,7 @@ public class RealMapActivity extends BaseNavActivity {
                 FileOutputStream fos = new FileOutputStream(file);
                 fos.write(defaultTxt.getBytes("UTF-8"));
                 fos.close();
-            } catch (Exception e) {
-            }
+            } catch (Exception e) {}
         }
 
         try {
@@ -206,8 +201,7 @@ public class RealMapActivity extends BaseNavActivity {
                 }
             }
             br.close();
-        } catch (Exception e) {
-        }
+        } catch (Exception e) {}
 
         if (sources.isEmpty()) {
             sources.add(new MapSource("谷歌路网", "https://mt1.google.com/vt/lyrs=r&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}"));
@@ -221,7 +215,7 @@ public class RealMapActivity extends BaseNavActivity {
         SharedPreferences sp = getSharedPreferences("hdm_config", MODE_PRIVATE);
         currentMapSourceName = sp.getString("last_map_source_name", "谷歌路网");
         currentOffset = sp.getFloat("compass_offset", 180.0f);
-
+        
         String projName = (app != null && app.currentProjectName != null) ? app.currentProjectName : "default";
         String spRoadKey = "last_road_name_" + projName;
         lastSelectedRoadName = sp.getString(spRoadKey, "主线");
@@ -230,15 +224,14 @@ public class RealMapActivity extends BaseNavActivity {
         mapBox.setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT));
 
         mapView = new CanvasMapView(this, null);
-
+        
         List<MapSource> sources = loadMapSources();
         mapView.setMapSources(sources);
-
+        
         int targetIdx = 0;
         for (int i = 0; i < sources.size(); i++) {
             if (sources.get(i).name.equals(currentMapSourceName)) {
-                targetIdx = i;
-                break;
+                targetIdx = i; break;
             }
         }
         mapView.setMapSourceIndex(targetIdx);
@@ -256,8 +249,7 @@ public class RealMapActivity extends BaseNavActivity {
         btnMenu.setElevation(dp(4));
         btnMenu.setGravity(Gravity.CENTER);
         FrameLayout.LayoutParams lpMenu = new FrameLayout.LayoutParams(fabSize, fabSize, Gravity.TOP | Gravity.LEFT);
-        lpMenu.topMargin = dp(16);
-        lpMenu.leftMargin = dp(16);
+        lpMenu.topMargin = dp(16); lpMenu.leftMargin = dp(16);
         btnMenu.setLayoutParams(lpMenu);
         mapBox.addView(btnMenu);
 
@@ -302,27 +294,20 @@ public class RealMapActivity extends BaseNavActivity {
         offsetLayout.addView(tvDegree);
 
         FrameLayout.LayoutParams lpOffset = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.RIGHT);
-        lpOffset.topMargin = dp(16);
-        lpOffset.rightMargin = dp(16);
+        lpOffset.topMargin = dp(16); lpOffset.rightMargin = dp(16);
         offsetLayout.setLayoutParams(lpOffset);
         mapBox.addView(offsetLayout);
 
         etOffset.addTextChangedListener(new TextWatcher() {
-            @Override
-            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-
-            @Override
-            public void onTextChanged(CharSequence s, int start, int before, int count) {}
-
-            @Override
-            public void afterTextChanged(Editable s) {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override public void afterTextChanged(Editable s) {
                 try {
                     if (s.length() > 0 && !s.toString().equals("-") && !s.toString().equals(".")) {
                         currentOffset = Float.parseFloat(s.toString());
                         getSharedPreferences("hdm_config", MODE_PRIVATE).edit().putFloat("compass_offset", currentOffset).apply();
                     }
-                } catch (Exception e) {
-                }
+                } catch (Exception e) {}
             }
         });
 
@@ -342,8 +327,7 @@ public class RealMapActivity extends BaseNavActivity {
         btnFitAll.setElevation(dp(4));
         btnFitAll.setGravity(Gravity.CENTER);
         FrameLayout.LayoutParams lpFit = new FrameLayout.LayoutParams(fabSize, fabSize, Gravity.BOTTOM | Gravity.LEFT);
-        lpFit.bottomMargin = dp(24);
-        lpFit.leftMargin = dp(16);
+        lpFit.bottomMargin = dp(24); lpFit.leftMargin = dp(16);
         btnFitAll.setLayoutParams(lpFit);
         mapBox.addView(btnFitAll);
 
@@ -355,8 +339,7 @@ public class RealMapActivity extends BaseNavActivity {
         btnLocate.setElevation(dp(4));
         btnLocate.setGravity(Gravity.CENTER);
         FrameLayout.LayoutParams lpLoc = new FrameLayout.LayoutParams(fabSize, fabSize, Gravity.BOTTOM | Gravity.RIGHT);
-        lpLoc.bottomMargin = dp(24);
-        lpLoc.rightMargin = dp(16);
+        lpLoc.bottomMargin = dp(24); lpLoc.rightMargin = dp(16);
         btnLocate.setLayoutParams(lpLoc);
         mapBox.addView(btnLocate);
 
@@ -377,7 +360,52 @@ public class RealMapActivity extends BaseNavActivity {
             }
         });
 
-        if (app.data != null) loadAllRoutes();
+        if (app.data != null) {
+            loadAllRoutes();
+            updateControlPoints(); // 初始化控制点状态
+        }
+    }
+
+    // ================= 新增：读取并绘制控制点 =================
+    private void updateControlPoints() {
+        if (!isShowControlPoints) {
+            mapView.setControlPoints(null);
+            return;
+        }
+        File ctrlFile = new File(Environment.getExternalStorageDirectory(), "1hdm/控制点.txt");
+        if (!ctrlFile.exists()) {
+            Toast.makeText(this, "未找到 1hdm/控制点.txt", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        
+        List<Object[]> ctrlList = new ArrayList<>();
+        try {
+            FileInputStream fis = new FileInputStream(ctrlFile);
+            BufferedReader br = new BufferedReader(new InputStreamReader(fis, "UTF-8"));
+            String line;
+            while ((line = br.readLine()) != null) {
+                line = line.trim();
+                if (line.isEmpty() || line.startsWith("#")) continue;
+                String[] parts = line.split(",");
+                if (parts.length >= 3) {
+                    String name = parts[0].trim();
+                    double x = Double.parseDouble(parts[1].trim());
+                    double y = Double.parseDouble(parts[2].trim());
+
+                    // 使用 Projection.xy2Gps 逆变换，把 X,Y 转成经纬度
+                    double[] lb = Projection.xy2Gps(x, y, app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
+                    if (lb != null && lb.length >= 2) {
+                        // {lat, lng, name}
+                        ctrlList.add(new Object[]{lb[1], lb[0], name});
+                    }
+                }
+            }
+            br.close();
+            mapView.setControlPoints(ctrlList);
+        } catch (Exception e) {
+            e.printStackTrace();
+            Toast.makeText(this, "控制点解析失败: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
     }
 
     private final SensorEventListener sensorListener = new SensorEventListener() {
@@ -391,7 +419,7 @@ public class RealMapActivity extends BaseNavActivity {
                 float azimuthRad = orientation[0];
                 float rawAzimuthDeg = (float) Math.toDegrees(azimuthRad);
                 if (rawAzimuthDeg < 0) rawAzimuthDeg += 360;
-
+                
                 float sensorBearing = (rawAzimuthDeg + currentOffset) % 360f;
                 if (sensorBearing < 0) sensorBearing += 360f;
 
@@ -403,13 +431,12 @@ public class RealMapActivity extends BaseNavActivity {
                 if (diff > 180) diff -= 360;
                 if (diff < -180) diff += 360;
                 currentAzimuth = currentAzimuth + 0.15f * diff;
-
+                
                 if (currentAzimuth < 0) currentAzimuth += 360;
                 if (currentAzimuth >= 360) currentAzimuth -= 360;
                 if (mapView != null) mapView.setGpsBearing(currentAzimuth);
             }
         }
-
         @Override
         public void onAccuracyChanged(Sensor sensor, int accuracy) {}
     };
@@ -420,7 +447,7 @@ public class RealMapActivity extends BaseNavActivity {
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setPadding(dp(24), dp(24), dp(24), dp(16));
-
+        
         TextView title = new TextView(this);
         title.setText("地图设置");
         title.setTextSize(18);
@@ -439,26 +466,58 @@ public class RealMapActivity extends BaseNavActivity {
         TextView btnCorrection = new TextView(this);
         btnCorrection.setText("RTK 点校正 (当前偏移: X=" + String.format("%.3f", app.rtkOffsetX) + ", Y=" + String.format("%.3f", app.rtkOffsetY) + ")");
         btnCorrection.setTextSize(16);
-        btnCorrection.setTextColor(0xFFD32F2F);
+        btnCorrection.setTextColor(0xFFD32F2F); 
         btnCorrection.setPadding(0, 0, 0, dp(16));
         btnCorrection.setOnClickListener(v -> showCorrectionDialog());
         layout.addView(btnCorrection);
-
+        
         View line0 = new View(this);
         line0.setBackgroundColor(0xFFEEEEEE);
         layout.addView(line0, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
 
+        // ================= 新增：显示控制点开关 =================
+        LinearLayout rowCtrl = new LinearLayout(this);
+        rowCtrl.setOrientation(LinearLayout.HORIZONTAL);
+        rowCtrl.setGravity(Gravity.CENTER_VERTICAL);
+        rowCtrl.setPadding(0, dp(16), 0, dp(16));
+        TextView tvCtrl = new TextView(this);
+        tvCtrl.setText("显示控制点");
+        tvCtrl.setTextSize(16);
+        tvCtrl.setTextColor(0xFF555555);
+        tvCtrl.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        rowCtrl.addView(tvCtrl);
+        
+        final TextView btnCtrlSwitch = new TextView(this);
+        btnCtrlSwitch.setText(isShowControlPoints ? "已开启" : "已关闭");
+        btnCtrlSwitch.setTextColor(isShowControlPoints ? Color.WHITE : 0xFF555555);
+        btnCtrlSwitch.setBackground(makeRoundRectBg(isShowControlPoints ? 0xFF0078D4 : 0xFFE0E0E0, 16));
+        btnCtrlSwitch.setPadding(dp(16), dp(6), dp(16), dp(6));
+        btnCtrlSwitch.setOnClickListener(v -> {
+            isShowControlPoints = !isShowControlPoints;
+            btnCtrlSwitch.setText(isShowControlPoints ? "已开启" : "已关闭");
+            btnCtrlSwitch.setTextColor(isShowControlPoints ? Color.WHITE : 0xFF555555);
+            btnCtrlSwitch.setBackground(makeRoundRectBg(isShowControlPoints ? 0xFF0078D4 : 0xFFE0E0E0, 16));
+            updateControlPoints();
+        });
+        rowCtrl.addView(btnCtrlSwitch);
+        layout.addView(rowCtrl);
+        // =========================================================
+        
+        View line0_2 = new View(this);
+        line0_2.setBackgroundColor(0xFFEEEEEE);
+        layout.addView(line0_2, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
+        
         LinearLayout rowName = new LinearLayout(this);
         rowName.setOrientation(LinearLayout.HORIZONTAL);
         rowName.setGravity(Gravity.CENTER_VERTICAL);
-        rowName.setPadding(0, dp(20), 0, dp(16));
+        rowName.setPadding(0, dp(16), 0, dp(16));
         TextView tvName = new TextView(this);
         tvName.setText("显示道路名称");
         tvName.setTextSize(16);
         tvName.setTextColor(0xFF555555);
         tvName.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         rowName.addView(tvName);
-
+        
         final TextView btnSwitch = new TextView(this);
         btnSwitch.setText(isShowRoadNames ? "已开启" : "已关闭");
         btnSwitch.setTextColor(isShowRoadNames ? Color.WHITE : 0xFF555555);
@@ -473,38 +532,38 @@ public class RealMapActivity extends BaseNavActivity {
         });
         rowName.addView(btnSwitch);
         layout.addView(rowName);
-
+        
         View line1 = new View(this);
         line1.setBackgroundColor(0xFFEEEEEE);
         LinearLayout.LayoutParams lpLine = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1));
         lpLine.bottomMargin = dp(16);
         layout.addView(line1, lpLine);
-
+        
         TextView tvMapTypeTitle = new TextView(this);
         tvMapTypeTitle.setText("地图图源 (可修改 1hdm/maps.txt 扩充)");
         tvMapTypeTitle.setTextSize(16);
         tvMapTypeTitle.setTextColor(0xFF333333);
         tvMapTypeTitle.setTypeface(null, android.graphics.Typeface.BOLD);
         layout.addView(tvMapTypeTitle);
-
+        
         final List<MapSource> sources = mapView.getMapSources();
         final List<TextView> mapTypeBtns = new ArrayList<>();
-
+        
         LinearLayout mapTypeLayout = new LinearLayout(this);
         mapTypeLayout.setOrientation(LinearLayout.HORIZONTAL);
         mapTypeLayout.setPadding(0, dp(12), 0, dp(16));
-
+        
         for (int i = 0; i < sources.size(); i++) {
             final int index = i;
             MapSource src = sources.get(i);
-
+            
             if (i > 0 && i % 3 == 0) {
                 layout.addView(mapTypeLayout);
                 mapTypeLayout = new LinearLayout(this);
                 mapTypeLayout.setOrientation(LinearLayout.HORIZONTAL);
                 mapTypeLayout.setPadding(0, 0, 0, dp(12));
             }
-
+            
             TextView btn = new TextView(this);
             btn.setText(src.name);
             btn.setTextSize(14);
@@ -516,14 +575,14 @@ public class RealMapActivity extends BaseNavActivity {
             if (i % 3 != 0) lp.leftMargin = dp(8);
             btn.setLayoutParams(lp);
             btn.setPadding(0, dp(8), 0, dp(8));
-
+            
             btn.setOnClickListener(v -> {
                 if (mapView == null) return;
                 mapView.setMapSourceIndex(index);
                 currentMapSourceName = src.name;
                 getSharedPreferences("hdm_config", MODE_PRIVATE).edit()
                         .putString("last_map_source_name", currentMapSourceName).apply();
-
+                
                 for (int j = 0; j < mapTypeBtns.size(); j++) {
                     boolean sel = (mapView.getMapSourceIndex() == j);
                     mapTypeBtns.get(j).setTextColor(sel ? Color.WHITE : 0xFF555555);
@@ -534,11 +593,11 @@ public class RealMapActivity extends BaseNavActivity {
             mapTypeLayout.addView(btn);
         }
         layout.addView(mapTypeLayout);
-
+        
         View line2 = new View(this);
         line2.setBackgroundColor(0xFFEEEEEE);
         layout.addView(line2, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
-
+        
         TextView tvRouteTitle = new TextView(this);
         tvRouteTitle.setText("当前路线");
         tvRouteTitle.setTextSize(16);
@@ -546,7 +605,7 @@ public class RealMapActivity extends BaseNavActivity {
         tvRouteTitle.setTypeface(null, android.graphics.Typeface.BOLD);
         tvRouteTitle.setPadding(0, dp(16), 0, dp(12));
         layout.addView(tvRouteTitle);
-
+        
         if (allRoadsList.isEmpty()) {
             TextView tvNoRoute = new TextView(this);
             tvNoRoute.setText("未加载路线数据");
@@ -558,22 +617,22 @@ public class RealMapActivity extends BaseNavActivity {
                 final int index = i;
                 String roadName = allRoadsList.get(i).name;
                 boolean isSelected = (currentSelectedRoad == i);
-
+                
                 TextView btnRoute = new TextView(this);
                 btnRoute.setText(roadName);
                 btnRoute.setTextSize(16);
                 btnRoute.setTextColor(isSelected ? 0xFF0078D4 : 0xFF333333);
                 btnRoute.setPadding(dp(12), dp(12), dp(12), dp(12));
-                if (isSelected) btnRoute.setBackground(makeRoundRectBg(0x1A0078D4, 8));
-
+                if (isSelected) btnRoute.setBackground(makeRoundRectBg(0x1A0078D4, 8)); 
+                
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
                 lp.topMargin = dp(4);
                 btnRoute.setLayoutParams(lp);
-
+                
                 btnRoute.setOnClickListener(v -> {
                     currentSelectedRoad = index;
                     lastSelectedRoadName = roadName;
-
+                    
                     String projName = (app != null && app.currentProjectName != null) ? app.currentProjectName : "default";
                     String spRoadKey = "last_road_name_" + projName;
                     getSharedPreferences("hdm_config", MODE_PRIVATE).edit().putString(spRoadKey, lastSelectedRoadName).apply();
@@ -584,8 +643,8 @@ public class RealMapActivity extends BaseNavActivity {
                 layout.addView(btnRoute);
             }
         }
-
-        // ================= 新增：3D 地球入口 =================
+        
+        // 3D 地球入口
         View line3 = new View(this);
         line3.setBackgroundColor(0xFFEEEEEE);
         layout.addView(line3, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
@@ -593,23 +652,19 @@ public class RealMapActivity extends BaseNavActivity {
         TextView btn3D = new TextView(this);
         btn3D.setText("查看当前 3D 地球 (WebGL) >");
         btn3D.setTextSize(16);
-        btn3D.setTextColor(0xFF0078D4); // 蓝色强调
+        btn3D.setTextColor(0xFF0078D4);
         btn3D.setPadding(0, dp(24), 0, dp(8));
         btn3D.setOnClickListener(v -> {
             if (settingsDialog != null) settingsDialog.dismiss();
-
-            // 获取当前地图中心点，传给 3D 页面
             double centerLat = mapView.getCenterLatitude();
             double centerLng = mapView.getCenterLongitude();
-
             Intent it = new Intent(RealMapActivity.this, Map3DActivity.class);
             it.putExtra("lat", centerLat);
             it.putExtra("lng", centerLng);
             startActivity(it);
         });
         layout.addView(btn3D);
-        // ====================================================
-
+        
         scrollView.addView(layout);
         builder.setView(scrollView);
         builder.setPositiveButton("完成", null);
@@ -629,27 +684,17 @@ public class RealMapActivity extends BaseNavActivity {
         tvTips.setTextColor(0xFF666666);
         layout.addView(tvTips);
 
-        // 输入框：当前 RTK 坐标
         LinearLayout row1 = new LinearLayout(this);
         row1.setOrientation(LinearLayout.HORIZONTAL);
         row1.setPadding(0, dp(16), 0, dp(8));
-        TextView tv1 = new TextView(this);
-        tv1.setText("当前RTK: ");
-        tv1.setTextSize(16);
+        TextView tv1 = new TextView(this); tv1.setText("当前RTK: "); tv1.setTextSize(16);
         row1.addView(tv1);
-        final EditText etCurX = new EditText(this);
-        etCurX.setHint("X");
-        etCurX.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED);
-        etCurX.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        row1.addView(etCurX);
-        final EditText etCurY = new EditText(this);
-        etCurY.setHint("Y");
-        etCurY.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED);
-        etCurY.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        row1.addView(etCurY);
+        final EditText etCurX = new EditText(this); etCurX.setHint("X"); etCurX.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED);
+        etCurX.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)); row1.addView(etCurX);
+        final EditText etCurY = new EditText(this); etCurY.setHint("Y"); etCurY.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED);
+        etCurY.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)); row1.addView(etCurY);
         layout.addView(row1);
 
-        // 读取当前 RTK 按钮
         TextView btnRead = new TextView(this);
         btnRead.setText("↺ 读取当前 RTK 平面坐标");
         btnRead.setTextColor(0xFF0078D4);
@@ -657,8 +702,7 @@ public class RealMapActivity extends BaseNavActivity {
         btnRead.setPadding(0, 0, 0, dp(16));
         btnRead.setOnClickListener(v -> {
             if (!app.hasRtkData || app.currentRtkFix == 0) {
-                Toast.makeText(this, "未收到 RTK 信号", Toast.LENGTH_SHORT).show();
-                return;
+                Toast.makeText(this, "未收到 RTK 信号", Toast.LENGTH_SHORT).show(); return;
             }
             double[] xy = Projection.gps2Xy(app.currentRtkLon, app.currentRtkLat, app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
             if (xy != null && xy.length >= 2) {
@@ -668,27 +712,17 @@ public class RealMapActivity extends BaseNavActivity {
         });
         layout.addView(btnRead);
 
-        // 输入框：已知点坐标
         LinearLayout row2 = new LinearLayout(this);
         row2.setOrientation(LinearLayout.HORIZONTAL);
         row2.setPadding(0, 0, 0, dp(16));
-        TextView tv2 = new TextView(this);
-        tv2.setText("已知点值: ");
-        tv2.setTextSize(16);
+        TextView tv2 = new TextView(this); tv2.setText("已知点值: "); tv2.setTextSize(16);
         row2.addView(tv2);
-        final EditText etTarX = new EditText(this);
-        etTarX.setHint("设计 X");
-        etTarX.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED);
-        etTarX.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        row2.addView(etTarX);
-        final EditText etTarY = new EditText(this);
-        etTarY.setHint("设计 Y");
-        etTarY.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED);
-        etTarY.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        row2.addView(etTarY);
+        final EditText etTarX = new EditText(this); etTarX.setHint("设计 X"); etTarX.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED);
+        etTarX.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)); row2.addView(etTarX);
+        final EditText etTarY = new EditText(this); etTarY.setHint("设计 Y"); etTarY.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED);
+        etTarY.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)); row2.addView(etTarY);
         layout.addView(row2);
 
-        // ================= 新增：读取控制点文件 =================
         File ctrlFile = new File(Environment.getExternalStorageDirectory(), "1hdm/控制点.txt");
         final List<String> ctrlNames = new ArrayList<>();
         final List<double[]> ctrlCoords = new ArrayList<>();
@@ -739,9 +773,7 @@ public class RealMapActivity extends BaseNavActivity {
             tvNoCtrl.setPadding(0, 0, 0, dp(16));
             layout.addView(tvNoCtrl);
         }
-        // ========================================================
 
-        // ================= 新增：改正数显示与手动输入 =================
         View lineDiv = new View(this);
         lineDiv.setBackgroundColor(0xFFEEEEEE);
         layout.addView(lineDiv, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
@@ -749,40 +781,23 @@ public class RealMapActivity extends BaseNavActivity {
         LinearLayout row3 = new LinearLayout(this);
         row3.setOrientation(LinearLayout.HORIZONTAL);
         row3.setPadding(0, dp(16), 0, dp(8));
-        TextView tv3 = new TextView(this);
-        tv3.setText("改正数: ");
-        tv3.setTextSize(16);
-        tv3.setTextColor(0xFFD32F2F);
+        TextView tv3 = new TextView(this); tv3.setText("改正数: "); tv3.setTextSize(16); tv3.setTextColor(0xFFD32F2F);
         row3.addView(tv3);
-        final EditText etDX = new EditText(this);
-        etDX.setHint("ΔX");
-        etDX.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED);
-        etDX.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        row3.addView(etDX);
-        final EditText etDY = new EditText(this);
-        etDY.setHint("ΔY");
-        etDY.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED);
-        etDY.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        row3.addView(etDY);
+        final EditText etDX = new EditText(this); etDX.setHint("ΔX"); etDX.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED);
+        etDX.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)); row3.addView(etDX);
+        final EditText etDY = new EditText(this); etDY.setHint("ΔY"); etDY.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED);
+        etDY.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)); row3.addView(etDY);
         layout.addView(row3);
 
-        // 初始化当前的偏移量
         etDX.setText(String.format("%.3f", app.rtkOffsetX));
         etDY.setText(String.format("%.3f", app.rtkOffsetY));
 
-        // 双向绑定逻辑
         final boolean[] isUpdating = {false};
-
-        // 监听 当前值和设计值，自动算改正数
+        
         TextWatcher valWatcher = new TextWatcher() {
-            @Override
-            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-
-            @Override
-            public void onTextChanged(CharSequence s, int start, int before, int count) {}
-
-            @Override
-            public void afterTextChanged(Editable s) {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override public void afterTextChanged(Editable s) {
                 if (isUpdating[0]) return;
                 isUpdating[0] = true;
                 try {
@@ -792,8 +807,7 @@ public class RealMapActivity extends BaseNavActivity {
                     double ty = etTarY.getText().toString().isEmpty() || etTarY.getText().toString().equals("-") ? 0 : Double.parseDouble(etTarY.getText().toString());
                     etDX.setText(String.format("%.3f", tx - cx));
                     etDY.setText(String.format("%.3f", ty - cy));
-                } catch (Exception e) {
-                }
+                } catch (Exception e) {}
                 isUpdating[0] = false;
             }
         };
@@ -802,16 +816,10 @@ public class RealMapActivity extends BaseNavActivity {
         etTarX.addTextChangedListener(valWatcher);
         etTarY.addTextChangedListener(valWatcher);
 
-        // 监听改正数，反推设计值
         TextWatcher offsetWatcher = new TextWatcher() {
-            @Override
-            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-
-            @Override
-            public void onTextChanged(CharSequence s, int start, int before, int count) {}
-
-            @Override
-            public void afterTextChanged(Editable s) {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override public void afterTextChanged(Editable s) {
                 if (isUpdating[0]) return;
                 isUpdating[0] = true;
                 try {
@@ -821,35 +829,33 @@ public class RealMapActivity extends BaseNavActivity {
                     double dy = etDY.getText().toString().isEmpty() || etDY.getText().toString().equals("-") ? 0 : Double.parseDouble(etDY.getText().toString());
                     etTarX.setText(String.format("%.3f", cx + dx));
                     etTarY.setText(String.format("%.3f", cy + dy));
-                } catch (Exception e) {
-                }
+                } catch (Exception e) {}
                 isUpdating[0] = false;
             }
         };
         etDX.addTextChangedListener(offsetWatcher);
         etDY.addTextChangedListener(offsetWatcher);
-        // ========================================================
 
         new AlertDialog.Builder(this)
                 .setTitle("RTK 单点平移校正")
                 .setView(layout)
                 .setPositiveButton("保存校正", (dialog, which) -> {
                     try {
-                        // 这里直接读取改正数，因为在双向绑定中，改正数已经被算好了
                         double dx = etDX.getText().toString().isEmpty() ? 0 : Double.parseDouble(etDX.getText().toString());
                         double dy = etDY.getText().toString().isEmpty() ? 0 : Double.parseDouble(etDY.getText().toString());
 
                         app.rtkOffsetX = dx;
                         app.rtkOffsetY = dy;
-
+                        
                         getSharedPreferences("hdm_config", MODE_PRIVATE).edit()
                                 .putFloat("rtk_offset_x", (float) app.rtkOffsetX)
                                 .putFloat("rtk_offset_y", (float) app.rtkOffsetY).apply();
 
                         Toast.makeText(this, "校正成功！偏移已保存", Toast.LENGTH_SHORT).show();
-
+                        
                         if (app.hasRtkData) updateMapLocation(app.currentRtkLat, app.currentRtkLon);
-
+                        if (isShowControlPoints) updateControlPoints(); // 校正后刷新控制点位置
+                        
                         if (settingsDialog != null) settingsDialog.dismiss();
 
                     } catch (Exception e) {
@@ -865,6 +871,7 @@ public class RealMapActivity extends BaseNavActivity {
                             .putFloat("rtk_offset_y", 0f).apply();
                     Toast.makeText(this, "已清除校正", Toast.LENGTH_SHORT).show();
                     if (app.hasRtkData) updateMapLocation(app.currentRtkLat, app.currentRtkLon);
+                    if (isShowControlPoints) updateControlPoints();
                     if (settingsDialog != null) settingsDialog.dismiss();
                 })
                 .show();
@@ -873,7 +880,7 @@ public class RealMapActivity extends BaseNavActivity {
     private void checkAndRequestBluetooth() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED ||
-                    checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
                 requestPermissions(new String[]{
                         Manifest.permission.BLUETOOTH_SCAN,
                         Manifest.permission.BLUETOOTH_CONNECT
@@ -941,8 +948,7 @@ public class RealMapActivity extends BaseNavActivity {
 
             double[][] lonlat = app.data.controlLonLat;
             double[][] xy = app.data.controlXy;
-            if (lonlat == null || xy == null || lonlat.length == 0 || lonlat.length != xy.length)
-                return;
+            if (lonlat == null || xy == null || lonlat.length == 0 || lonlat.length != xy.length) return;
 
             double[] sourceXY = new double[lonlat.length * 2];
             double[] targetXY = new double[lonlat.length * 2];
@@ -953,8 +959,7 @@ public class RealMapActivity extends BaseNavActivity {
             boolean isUtm = app.data.projection.toLowerCase().contains("utm");
 
             for (int i = 0; i < lonlat.length; i++) {
-                double[] projected = isUtm ? Projection.utm_proj(lonlat[i][0], lonlat[i][
-                        1]) : Projection.gauss_proj(lonlat[i][0], lonlat[i][1], center);
+                double[] projected = isUtm ? Projection.utm_proj(lonlat[i][0], lonlat[i][1]) : Projection.gauss_proj(lonlat[i][0], lonlat[i][1], center);
                 sourceXY[i * 2] = projected[0];
                 sourceXY[i * 2 + 1] = projected[1];
                 targetXY[i * 2] = xy[i][0];
@@ -972,10 +977,8 @@ public class RealMapActivity extends BaseNavActivity {
 
                 for (int i = 0; i < route.size(); i++) {
                     double[] pt = route.get(i);
-                    double[] lsxy = Projection.fourParameterTransform(pt[1], pt[2], cs4[0], cs4[
-                    1], cs4[2], cs4[3]);
-                    double[] lb = isUtm ? Projection.utm_unproj(lsxy[0], lsxy[
-                            1], north, zone) : Projection.gauss_unproj(lsxy[0], lsxy[1], center);
+                    double[] lsxy = Projection.fourParameterTransform(pt[1], pt[2], cs4[0], cs4[1], cs4[2], cs4[3]);
+                    double[] lb = isUtm ? Projection.utm_unproj(lsxy[0], lsxy[1], north, zone) : Projection.gauss_unproj(lsxy[0], lsxy[1], center);
 
                     double lon = lb[0];
                     double lat = lb[1];
@@ -1019,10 +1022,6 @@ public class RealMapActivity extends BaseNavActivity {
         listener = new LocationListener() {
             @Override
             public void onLocationChanged(Location loc) {
-                // 无论是否连 RTK，都记录手机当前 GPS 位置，留给 3D 页面备用
-                app.currentGpsLat = loc.getLatitude();
-                app.currentGpsLon = loc.getLongitude();
-
                 if (!app.rtkConnected && !app.hasRtkData) {
                     final double lon = loc.getLongitude();
                     final double lat = loc.getLatitude();
@@ -1035,34 +1034,26 @@ public class RealMapActivity extends BaseNavActivity {
                 }
             }
 
-            // ... 其他方法不变 ...
             @Override
             public void onStatusChanged(String provider, int status, Bundle extras) {}
 
             @Override
             public void onProviderEnabled(String provider) {
-                try {
-                    lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000, 0, listener);
-                } catch (Exception e) {
-                }
+                try { lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000, 0, listener); } catch (Exception e) {}
             }
 
             @Override
             public void onProviderDisabled(String provider) {}
         };
 
-        try {
-            lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000, 0, listener);
-        } catch (Exception e) {
-        }
+        try { lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000, 0, listener); } catch (Exception e) {}
     }
 
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQ_LOCATION) {
-            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED)
-                startGps();
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) startGps();
         } else if (requestCode == REQ_BLUETOOTH) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 showRtkDeviceDialog();
@@ -1076,10 +1067,7 @@ public class RealMapActivity extends BaseNavActivity {
     protected void onDestroy() {
         super.onDestroy();
         if (lm != null && listener != null) {
-            try {
-                lm.removeUpdates(listener);
-            } catch (Exception e) {
-            }
+            try { lm.removeUpdates(listener); } catch (Exception e) {}
         }
     }
 
@@ -1087,10 +1075,7 @@ public class RealMapActivity extends BaseNavActivity {
     protected void onResume() {
         super.onResume();
         if (lm != null && listener != null) {
-            try {
-                lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000, 0, listener);
-            } catch (Exception e) {
-            }
+            try { lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000, 0, listener); } catch (Exception e) {}
         }
         if (sensorManager != null && rotationSensor != null) {
             sensorManager.registerListener(sensorListener, rotationSensor, SensorManager.SENSOR_DELAY_GAME);
