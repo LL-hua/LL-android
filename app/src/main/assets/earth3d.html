@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>3D 实景</title>
+    <link href="https://unpkg.com/maplibre-gl@5.0.0/dist/maplibre-gl.css" rel="stylesheet" />
+    <script src="https://unpkg.com/maplibre-gl@5.0.0/dist/maplibre-gl.js"></script>
+    <style>
+        body { margin: 0; padding: 0; background-color: #000; overflow: hidden; font-family: sans-serif; }
+        #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+        
+        .btn {
+            position: absolute; z-index: 999; background: rgba(255,255,255,0.95);
+            padding: 10px 16px; border-radius: 8px; font-size: 14px; font-weight: bold;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2); user-select: none; cursor: pointer;
+        }
+        
+        .back-btn { top: 20px; left: 20px; color: #333; }
+        .layer-btn { top: 20px; right: 20px; color: #0078D4; }
+        
+        /* 右下角圆形的定位按钮 */
+        .locate-btn {
+            bottom: 30px; right: 20px; width: 48px; height: 48px;
+            border-radius: 24px; font-size: 24px; display: flex;
+            align-items: center; justify-content: center; color: #0078D4;
+            padding: 0;
+        }
+
+        /* 图层面板 */
+        .layer-panel {
+            position: absolute; top: 70px; right: 20px; z-index: 1000;
+            background: rgba(255,255,255,0.95); border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3); display: none;
+            flex-direction: column; overflow: hidden; width: 120px;
+        }
+        .layer-item { padding: 12px; font-size: 14px; color: #333; text-align: center; border-bottom: 1px solid #eee; }
+        .layer-item:last-child { border-bottom: none; }
+        .layer-item:active { background: #f0f0f0; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    
+    <div class="btn back-btn" onclick="AndroidBack()">⌂ 返回</div>
+    <div class="btn layer-btn" onclick="toggleLayerPanel()">⛁ 图层</div>
+    <div class="btn locate-btn" onclick="locateMe()">◎</div>
+
+    <div class="layer-panel" id="layerPanel">
+        <div class="layer-item" onclick="switchMapType('road')">谷歌路网</div>
+        <div class="layer-item" onclick="switchMapType('sat')">谷歌卫星</div>
+        <div class="layer-item" onclick="switchMapType('topo')">地形图</div>
+        <div class="layer-item" onclick="switchMapType('osm')">OSM</div>
+    </div>
+    
+    <script>
+        function AndroidBack() { if (window.AndroidInterface) window.AndroidInterface.closeActivity(); }
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const initLat = parseFloat(urlParams.get('lat')) || 39.9042;
+        const initLng = parseFloat(urlParams.get('lng')) || 116.4074;
+        
+        let roadData = null;
+        try { roadData = JSON.parse(decodeURIComponent(urlParams.get('geojson'))); } catch(e) {}
+
+        let currentGpsLat = initLat;
+        let currentGpsLng = initLng;
+
+        var map = new maplibregl.Map({
+            container: 'map',
+            style: { version: 8, sources: {}, layers: [] }, 
+            center: [initLng, initLat], 
+            zoom: 16, pitch: 60, attributionControl: false
+        });
+
+        let gpsMarker = null;
+
+        // 供 Android 调用的实时位置更新
+        function updateMyLocation(lat, lng) {
+            currentGpsLat = lat;
+            currentGpsLng = lng;
+            if (!gpsMarker) {
+                gpsMarker = new maplibregl.Marker({color: '#0078D4'}).setLngLat([lng, lat]).addTo(map);
+            } else {
+                gpsMarker.setLngLat([lng, lat]);
+            }
+        }
+
+        // 右下角定位按钮：飞到当前位置，恢复60度倾角
+        function locateMe() {
+            map.flyTo({
+                center: [currentGpsLng, currentGpsLat],
+                zoom: 17,
+                pitch: 60,
+                bearing: 0,
+                duration: 1000
+            });
+        }
+
+        // 图层面板控制
+        function toggleLayerPanel() {
+            let panel = document.getElementById('layerPanel');
+            panel.style.display = panel.style.display === 'flex' ? 'none' : 'flex';
+        }
+
+        // 切换图源
+        function switchMapType(type) {
+            document.getElementById('layerPanel').style.display = 'none';
+            
+            let tileUrl = "";
+            // 注意这里用了 hdm://tile/{type}/{z}/{x}/{y}.png 的格式，方便 Android 拦截
+            if (type === 'road') tileUrl = "hdm://tile/road/{z}/{x}/{y}.png";
+            else if (type === 'sat') tileUrl = "hdm://tile/sat/{z}/{x}/{y}.png";
+            else if (type === 'topo') tileUrl = "hdm://tile/topo/{z}/{x}/{y}.png";
+            else if (type === 'osm') tileUrl = "hdm://tile/osm/{z}/{x}/{y}.png";
+
+            // 在线备选地址
+            let fallbackUrl = "";
+            if (type === 'road') fallbackUrl = "https://mt1.google.com/vt/lyrs=r&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}";
+            else if (type === 'sat') fallbackUrl = "https://mt1.google.com/vt/lyrs=y&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}";
+            else if (type === 'topo') fallbackUrl = "https://a.tile.opentopomap.org/{z}/{x}/{y}.png";
+            else if (type === 'osm') fallbackUrl = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+
+            // 更新图源
+            map.getSource('base-map').setTiles([tileUrl, fallbackUrl]);
+        }
+
+        function generateBuildingsAlongRoad(geojson) {
+            let buildings = [];
+            if (!geojson || !geojson.features || geojson.features.length === 0) return buildings;
+            
+            let coords = geojson.features[0].geometry.coordinates;
+            for (let i = 0; i < coords.length - 1; i += 2) {
+                let p1 = coords[i], p2 = coords[i+1];
+                let dx = p2[0] - p1[0], dy = p2[1] - p1[1];
+                let len = Math.sqrt(dx*dx + dy*dy);
+                if (len === 0) continue;
+                
+                let nx = -dy / len, ny = dx / len; 
+                let offset = 0.00015; 
+                
+                if (Math.random() > 0.3) {
+                    let bx = p1[0] + nx * offset, by = p1[1] + ny * offset;
+                    let size = 0.00008 + Math.random() * 0.00008;
+                    buildings.push({
+                        "type": "Feature", "properties": { "height": 15 + Math.random() * 50 },
+                        "geometry": { "type": "Polygon", "coordinates": [[[bx, by], [bx+size, by], [bx+size, by+size], [bx, by+size], [bx, by]]] }
+                    });
+                }
+                if (Math.random() > 0.3) {
+                    let bx = p1[0] - nx * offset, by = p1[1] - ny * offset;
+                    let size = 0.00008 + Math.random() * 0.00008;
+                    buildings.push({
+                        "type": "Feature", "properties": { "height": 15 + Math.random() * 50 },
+                        "geometry": { "type": "Polygon", "coordinates": [[[bx, by], [bx+size, by], [bx+size, by+size], [bx, by+size], [bx, by]]] }
+                    });
+                }
+            }
+            return buildings;
+        }
+
+        map.on('style.load', function () {
+            map.setProjection({ type: 'globe' });
+            
+            // 默认加载路网
+            map.addSource('base-map', {
+                type: 'raster',
+                tiles: ["hdm://tile/road/{z}/{x}/{y}.png", "https://mt1.google.com/vt/lyrs=r&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}"],
+                tileSize: 256
+            });
+            map.addLayer({ id: 'base-layer', type: 'raster', source: 'base-map' });
+
+            if (roadData) {
+                map.addSource('route-source', { type: 'geojson', data: roadData });
+                map.addLayer({
+                    id: 'route-casing', type: 'line', source: 'route-source',
+                    layout: { 'line-join': 'round', 'line-cap': 'round' },
+                    paint: { 'line-color': '#0050b3', 'line-width': 20, 'line-opacity': 0.5 }
+                });
+                map.addLayer({
+                    id: 'route-line', type: 'line', source: 'route-source',
+                    layout: { 'line-join': 'round', 'line-cap': 'round' },
+                    paint: { 'line-color': '#0078D4', 'line-width': 6 }
+                });
+
+                let roadBuildings = generateBuildingsAlongRoad(roadData);
+                map.addSource('road-buildings', { type: 'geojson', data: { "type": "FeatureCollection", "features": roadBuildings } });
+                map.addLayer({
+                    id: '3d-buildings', type: 'fill-extrusion', source: 'road-buildings',
+                    paint: { 'fill-extrusion-color': '#00e5ff', 'fill-extrusion-height': ['get', 'height'], 'fill-extrusion-opacity': 0.7 }
+                });
+            }
+            
+            new maplibregl.Marker({color: 'red'}).setLngLat([initLng, initLat]).addTo(map);
+        });
+    </script>
+</body>
+</html>

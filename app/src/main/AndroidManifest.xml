@@ -33,6 +33,7 @@
         <activity android:name=".CalcActivity" android:exported="false" />
         <activity android:name=".LayoutActivity" android:exported="false" />
         <activity android:name=".EarthworkActivity" android:exported="false" />
+        <activity android:name=".Map3DActivity" />
       
     </application>
 </manifest>

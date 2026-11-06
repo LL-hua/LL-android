@@ -25,7 +25,11 @@ public class MyApp extends Application {
     public double currentRtkAlt = 0;
     public int currentRtkFix = 0; 
     public boolean hasRtkData = false;
-    public boolean rtkConnected = false; // 新增：是否已连接蓝牙硬件
+    public boolean rtkConnected = false;
+
+    // ===== 新增：手机自带 GPS 数据 =====
+    public double currentGpsLat = 0;
+    public double currentGpsLon = 0;
 
     // RTK 点校正偏移量
     public double rtkOffsetX = 0.0;
