@@ -99,7 +99,6 @@
             document.getElementById('layerPanel').style.display = 'none';
             let tileUrl = "";
             
-            // 恢复真实的请求地址，Android 底层会自动“偷梁换柱”
             if (type === 'road') tileUrl = "https://mt1.google.com/vt/lyrs=r&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}";
             else if (type === 'sat') tileUrl = "https://mt1.google.com/vt/lyrs=y&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}";
             else if (type === 'topo') tileUrl = "https://a.tile.opentopomap.org/{z}/{x}/{y}.png";
@@ -145,7 +144,6 @@
         map.on('style.load', function () {
             map.setProjection({ type: 'globe' });
             
-            // 默认加载路网
             map.addSource('base-map', {
                 type: 'raster',
                 tiles: ["https://mt1.google.com/vt/lyrs=r&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}"],
@@ -156,23 +154,37 @@
             if (roadData && roadData.features && roadData.features.length > 0) {
                 map.addSource('route-source', { type: 'geojson', data: roadData });
                 
-                // 1. 画底层宽带，主线深蓝，支线灰色
+                // ================= 1. 支线：彩色虚线 =================
                 map.addLayer({
-                    id: 'route-casing', type: 'line', source: 'route-source',
+                    id: 'route-extra-line', type: 'line', source: 'route-source',
+                    filter: ['==', ['get', 'type'], 'extra'],
                     layout: { 'line-join': 'round', 'line-cap': 'round' },
                     paint: { 
-                        'line-color': ['match', ['get', 'type'], 'main', '#0050b3', '#757575'],
+                        'line-color': ['get', 'color'], // 读取传入的颜色
+                        'line-width': 5,
+                        'line-dasharray': [2, 2]
+                    }
+                });
+
+                // ================= 2. 主线底宽 =================
+                map.addLayer({
+                    id: 'route-main-casing', type: 'line', source: 'route-source',
+                    filter: ['==', ['get', 'type'], 'main'],
+                    layout: { 'line-join': 'round', 'line-cap': 'round' },
+                    paint: { 
+                        'line-color': '#0050b3',
                         'line-width': 16, 
                         'line-opacity': 0.6 
                     }
                 });
 
-                // 2. 画中心线，主线蓝色，支线浅灰
+                // ================= 3. 主线中心线 =================
                 map.addLayer({
-                    id: 'route-line', type: 'line', source: 'route-source',
+                    id: 'route-main-line', type: 'line', source: 'route-source',
+                    filter: ['==', ['get', 'type'], 'main'],
                     layout: { 'line-join': 'round', 'line-cap': 'round' },
                     paint: { 
-                        'line-color': ['match', ['get', 'type'], 'main', '#0078D4', '#9E9E9E'],
+                        'line-color': '#0078D4',
                         'line-width': 6 
                     }
                 });

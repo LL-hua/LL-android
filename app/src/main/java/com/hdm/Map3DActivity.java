@@ -25,6 +25,12 @@ public class Map3DActivity extends Activity {
     private Handler handler = new Handler(Looper.getMainLooper());
     private boolean isRunning = true;
 
+    // 和 2D 页面一模一样的调色板
+    private final String[] palette = {
+            "#1E88E5", "#43A047", "#FB8C00", "#8E24AA", "#00ACC1",
+            "#D81B60", "#6D4C41", "#7CB342", "#3949AB", "#546E7A"
+    };
+
     @SuppressLint("SetJavaScriptEnabled")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -45,13 +51,11 @@ public class Map3DActivity extends Activity {
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         webView.setLayerType(WebView.LAYER_TYPE_HARDWARE, null);
 
-        // ================= 核心：偷梁换柱，无感拦截在线图源 =================
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 String url = request.getUrl().toString();
                 
-                // 识别是哪个图源
                 String dbName = null;
                 if (url.contains("mt1.google.com/vt/lyrs=r")) dbName = "hdm_road.mbtiles";
                 else if (url.contains("mt1.google.com/vt/lyrs=y")) dbName = "hdm_sat.mbtiles";
@@ -60,7 +64,6 @@ public class Map3DActivity extends Activity {
 
                 if (dbName != null) {
                     try {
-                        // 提取 z/x/y
                         Matcher m = Pattern.compile("(\\d+)/(\\d+)/(\\d+)\\.png").matcher(url);
                         if (m.find()) {
                             int z = Integer.parseInt(m.group(1));
@@ -70,27 +73,20 @@ public class Map3DActivity extends Activity {
                             TileDatabase db = new TileDatabase(view.getContext(), dbName);
                             byte[] data = db.getTile(z, x, y);
                             if (data != null) {
-                                // 本地有缓存，直接掉包返回给前端！
                                 return new WebResourceResponse("image/png", "utf-8", new ByteArrayInputStream(data));
                             }
                         }
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                    }
+                    } catch (Exception e) { e.printStackTrace(); }
                 }
-                // 本地没缓存，放行去请求真实的网络
                 return super.shouldInterceptRequest(view, request);
             }
         });
 
         webView.addJavascriptInterface(new Object() {
             @JavascriptInterface
-            public void closeActivity() {
-                runOnUiThread(() -> finish());
-            }
+            public void closeActivity() { runOnUiThread(() -> finish()); }
         }, "AndroidInterface");
 
-        // 获取多线路数据
         String geoJson = getRoadGeoJson();
 
         try {
@@ -99,7 +95,6 @@ public class Map3DActivity extends Activity {
             webView.loadUrl(url);
         } catch (Exception e) {}
 
-        // 定时推送 GPS/RTK 位置
         handler.postDelayed(new Runnable() {
             @Override
             public void run() {
@@ -114,7 +109,6 @@ public class Map3DActivity extends Activity {
         }, 1000);
     }
 
-    // ================= 支持多线路的 GeoJSON 构建 =================
     private String getRoadGeoJson() {
         if (app.data == null) return "";
         try {
@@ -122,17 +116,19 @@ public class Map3DActivity extends Activity {
             sb.append("{\"type\":\"FeatureCollection\",\"features\":[");
             boolean isFirst = true;
 
-            // 1. 主线
-            String mainJson = createLineJson(app.data.pqx, "main");
+            // 1. 主线，颜色固定为 #0078D4
+            String mainJson = createLineJson(app.data.pqx, "main", "#0078D4");
             if (!mainJson.isEmpty()) {
                 sb.append(mainJson);
                 isFirst = false;
             }
 
-            // 2. 其它线路
+            // 2. 其它线路，循环分配颜色
             if (app.data.extraRoads != null) {
-                for (MapRoadData extra : app.data.extraRoads) {
-                    String extraJson = createLineJson(extra.pqx, "extra");
+                for (int i = 0; i < app.data.extraRoads.size(); i++) {
+                    MapRoadData extra = app.data.extraRoads.get(i);
+                    String color = palette[i % palette.length];
+                    String extraJson = createLineJson(extra.pqx, "extra", color);
                     if (!extraJson.isEmpty()) {
                         if (!isFirst) sb.append(",");
                         sb.append(extraJson);
@@ -147,13 +143,14 @@ public class Map3DActivity extends Activity {
         }
     }
 
-    private String createLineJson(double[][] pqx, String type) {
+    private String createLineJson(double[][] pqx, String type, String color) {
         try {
             List<double[]> route = LL.dantiaoxianlu(pqx, 0, 20.0);
             if (route.isEmpty()) return "";
 
             StringBuilder sb = new StringBuilder();
-            sb.append("{\"type\":\"Feature\",\"properties\":{\"type\":\"").append(type).append("\"},\"geometry\":{\"type\":\"LineString\",\"coordinates\":[");
+            // 将颜色塞进 properties
+            sb.append("{\"type\":\"Feature\",\"properties\":{\"type\":\"").append(type).append("\",\"color\":\"").append(color).append("\"},\"geometry\":{\"type\":\"LineString\",\"coordinates\":[");
 
             double[][] lonlat = app.data.controlLonLat;
             double[][] xy = app.data.controlXy;
