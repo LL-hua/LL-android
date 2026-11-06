@@ -19,7 +19,6 @@
         .back-btn { top: 20px; left: 20px; color: #333; }
         .layer-btn { top: 20px; right: 20px; color: #0078D4; }
         
-        /* 右下角圆形的定位按钮 */
         .locate-btn {
             bottom: 30px; right: 20px; width: 48px; height: 48px;
             border-radius: 24px; font-size: 24px; display: flex;
@@ -27,7 +26,6 @@
             padding: 0;
         }
 
-        /* 图层面板 */
         .layer-panel {
             position: absolute; top: 70px; right: 20px; z-index: 1000;
             background: rgba(255,255,255,0.95); border-radius: 8px;
@@ -75,7 +73,6 @@
 
         let gpsMarker = null;
 
-        // 供 Android 调用的实时位置更新
         function updateMyLocation(lat, lng) {
             currentGpsLat = lat;
             currentGpsLng = lng;
@@ -86,50 +83,36 @@
             }
         }
 
-        // 右下角定位按钮：飞到当前位置，恢复60度倾角
         function locateMe() {
             map.flyTo({
                 center: [currentGpsLng, currentGpsLat],
-                zoom: 17,
-                pitch: 60,
-                bearing: 0,
-                duration: 1000
+                zoom: 17, pitch: 60, bearing: 0, duration: 1000
             });
         }
 
-        // 图层面板控制
         function toggleLayerPanel() {
             let panel = document.getElementById('layerPanel');
             panel.style.display = panel.style.display === 'flex' ? 'none' : 'flex';
         }
 
-        // 切换图源
         function switchMapType(type) {
             document.getElementById('layerPanel').style.display = 'none';
-            
             let tileUrl = "";
-            // 注意这里用了 hdm://tile/{type}/{z}/{x}/{y}.png 的格式，方便 Android 拦截
-            if (type === 'road') tileUrl = "hdm://tile/road/{z}/{x}/{y}.png";
-            else if (type === 'sat') tileUrl = "hdm://tile/sat/{z}/{x}/{y}.png";
-            else if (type === 'topo') tileUrl = "hdm://tile/topo/{z}/{x}/{y}.png";
-            else if (type === 'osm') tileUrl = "hdm://tile/osm/{z}/{x}/{y}.png";
+            
+            // 恢复真实的请求地址，Android 底层会自动“偷梁换柱”
+            if (type === 'road') tileUrl = "https://mt1.google.com/vt/lyrs=r&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}";
+            else if (type === 'sat') tileUrl = "https://mt1.google.com/vt/lyrs=y&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}";
+            else if (type === 'topo') tileUrl = "https://a.tile.opentopomap.org/{z}/{x}/{y}.png";
+            else if (type === 'osm') tileUrl = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 
-            // 在线备选地址
-            let fallbackUrl = "";
-            if (type === 'road') fallbackUrl = "https://mt1.google.com/vt/lyrs=r&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}";
-            else if (type === 'sat') fallbackUrl = "https://mt1.google.com/vt/lyrs=y&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}";
-            else if (type === 'topo') fallbackUrl = "https://a.tile.opentopomap.org/{z}/{x}/{y}.png";
-            else if (type === 'osm') fallbackUrl = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
-
-            // 更新图源
-            map.getSource('base-map').setTiles([tileUrl, fallbackUrl]);
+            map.getSource('base-map').setTiles([tileUrl]);
         }
 
-        function generateBuildingsAlongRoad(geojson) {
+        function generateBuildingsAlongRoad(mainFeature) {
             let buildings = [];
-            if (!geojson || !geojson.features || geojson.features.length === 0) return buildings;
+            if (!mainFeature || !mainFeature.geometry || !mainFeature.geometry.coordinates) return buildings;
             
-            let coords = geojson.features[0].geometry.coordinates;
+            let coords = mainFeature.geometry.coordinates;
             for (let i = 0; i < coords.length - 1; i += 2) {
                 let p1 = coords[i], p2 = coords[i+1];
                 let dx = p2[0] - p1[0], dy = p2[1] - p1[1];
@@ -165,30 +148,45 @@
             // 默认加载路网
             map.addSource('base-map', {
                 type: 'raster',
-                tiles: ["hdm://tile/road/{z}/{x}/{y}.png", "https://mt1.google.com/vt/lyrs=r&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}"],
+                tiles: ["https://mt1.google.com/vt/lyrs=r&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}"],
                 tileSize: 256
             });
             map.addLayer({ id: 'base-layer', type: 'raster', source: 'base-map' });
 
-            if (roadData) {
+            if (roadData && roadData.features && roadData.features.length > 0) {
                 map.addSource('route-source', { type: 'geojson', data: roadData });
+                
+                // 1. 画底层宽带，主线深蓝，支线灰色
                 map.addLayer({
                     id: 'route-casing', type: 'line', source: 'route-source',
                     layout: { 'line-join': 'round', 'line-cap': 'round' },
-                    paint: { 'line-color': '#0050b3', 'line-width': 20, 'line-opacity': 0.5 }
+                    paint: { 
+                        'line-color': ['match', ['get', 'type'], 'main', '#0050b3', '#757575'],
+                        'line-width': 16, 
+                        'line-opacity': 0.6 
+                    }
                 });
+
+                // 2. 画中心线，主线蓝色，支线浅灰
                 map.addLayer({
                     id: 'route-line', type: 'line', source: 'route-source',
                     layout: { 'line-join': 'round', 'line-cap': 'round' },
-                    paint: { 'line-color': '#0078D4', 'line-width': 6 }
+                    paint: { 
+                        'line-color': ['match', ['get', 'type'], 'main', '#0078D4', '#9E9E9E'],
+                        'line-width': 6 
+                    }
                 });
 
-                let roadBuildings = generateBuildingsAlongRoad(roadData);
-                map.addSource('road-buildings', { type: 'geojson', data: { "type": "FeatureCollection", "features": roadBuildings } });
-                map.addLayer({
-                    id: '3d-buildings', type: 'fill-extrusion', source: 'road-buildings',
-                    paint: { 'fill-extrusion-color': '#00e5ff', 'fill-extrusion-height': ['get', 'height'], 'fill-extrusion-opacity': 0.7 }
-                });
+                // 找主线来造楼
+                let mainFeature = roadData.features.find(f => f.properties.type === 'main');
+                if (mainFeature) {
+                    let roadBuildings = generateBuildingsAlongRoad(mainFeature);
+                    map.addSource('road-buildings', { type: 'geojson', data: { "type": "FeatureCollection", "features": roadBuildings } });
+                    map.addLayer({
+                        id: '3d-buildings', type: 'fill-extrusion', source: 'road-buildings',
+                        paint: { 'fill-extrusion-color': '#00e5ff', 'fill-extrusion-height': ['get', 'height'], 'fill-extrusion-opacity': 0.7 }
+                    });
+                }
             }
             
             new maplibregl.Marker({color: 'red'}).setLngLat([initLng, initLat]).addTo(map);

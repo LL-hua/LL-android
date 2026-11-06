@@ -15,6 +15,8 @@ import android.webkit.WebViewClient;
 import java.io.ByteArrayInputStream;
 import java.net.URLEncoder;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class Map3DActivity extends Activity {
 
@@ -43,35 +45,40 @@ public class Map3DActivity extends Activity {
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         webView.setLayerType(WebView.LAYER_TYPE_HARDWARE, null);
 
-        // ================= 核心：根据 URL 类型拦截本地瓦片缓存 =================
+        // ================= 核心：偷梁换柱，无感拦截在线图源 =================
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 String url = request.getUrl().toString();
-                // 拦截格式：hdm://tile/road/16/52345/34567.png
-                if (url.startsWith("hdm://tile/")) {
+                
+                // 识别是哪个图源
+                String dbName = null;
+                if (url.contains("mt1.google.com/vt/lyrs=r")) dbName = "hdm_road.mbtiles";
+                else if (url.contains("mt1.google.com/vt/lyrs=y")) dbName = "hdm_sat.mbtiles";
+                else if (url.contains("a.tile.opentopomap.org")) dbName = "hdm_topo.mbtiles";
+                else if (url.contains("tile.openstreetmap.org")) dbName = "hdm_osm.mbtiles";
+
+                if (dbName != null) {
                     try {
-                        String[] parts = url.replace("hdm://tile/", "").split("/");
-                        String type = parts[0]; // road, sat, topo, osm
-                        int z = Integer.parseInt(parts[1]);
-                        int x = Integer.parseInt(parts[2]);
-                        int y = Integer.parseInt(parts[3].replace(".png", ""));
+                        // 提取 z/x/y
+                        Matcher m = Pattern.compile("(\\d+)/(\\d+)/(\\d+)\\.png").matcher(url);
+                        if (m.find()) {
+                            int z = Integer.parseInt(m.group(1));
+                            int x = Integer.parseInt(m.group(2));
+                            int y = Integer.parseInt(m.group(3));
 
-                        // 映射数据库名称
-                        String dbName = "hdm_road.mbtiles";
-                        if (type.equals("sat")) dbName = "hdm_sat.mbtiles";
-                        else if (type.equals("topo")) dbName = "hdm_topo.mbtiles";
-                        else if (type.equals("osm")) dbName = "hdm_osm.mbtiles";
-
-                        TileDatabase db = new TileDatabase(view.getContext(), dbName);
-                        byte[] data = db.getTile(z, x, y);
-                        if (data != null) {
-                            return new WebResourceResponse("image/png", "utf-8", new ByteArrayInputStream(data));
+                            TileDatabase db = new TileDatabase(view.getContext(), dbName);
+                            byte[] data = db.getTile(z, x, y);
+                            if (data != null) {
+                                // 本地有缓存，直接掉包返回给前端！
+                                return new WebResourceResponse("image/png", "utf-8", new ByteArrayInputStream(data));
+                            }
                         }
                     } catch (Exception e) {
                         e.printStackTrace();
                     }
                 }
+                // 本地没缓存，放行去请求真实的网络
                 return super.shouldInterceptRequest(view, request);
             }
         });
@@ -83,7 +90,7 @@ public class Map3DActivity extends Activity {
             }
         }, "AndroidInterface");
 
-        // 获取道路数据
+        // 获取多线路数据
         String geoJson = getRoadGeoJson();
 
         try {
@@ -92,36 +99,66 @@ public class Map3DActivity extends Activity {
             webView.loadUrl(url);
         } catch (Exception e) {}
 
-        // ================= 核心：定时推送 GPS/RTK 位置 =================
+        // 定时推送 GPS/RTK 位置
         handler.postDelayed(new Runnable() {
             @Override
             public void run() {
                 if (!isRunning) return;
-                
-                // 优先用 RTK，其次用手机 GPS
                 double cLat = app.hasRtkData ? app.currentRtkLat : app.currentGpsLat;
                 double cLng = app.hasRtkData ? app.currentRtkLon : app.currentGpsLon;
-                
                 if (cLat != 0 && cLng != 0) {
-                    String js = "updateMyLocation(" + cLat + "," + cLng + ")";
-                    webView.evaluateJavascript(js, null);
+                    webView.evaluateJavascript("updateMyLocation(" + cLat + "," + cLng + ")", null);
                 }
                 handler.postDelayed(this, 1000); 
             }
         }, 1000);
     }
 
+    // ================= 支持多线路的 GeoJSON 构建 =================
     private String getRoadGeoJson() {
         if (app.data == null) return "";
         try {
-            List<double[]> route = LL.dantiaoxianlu(app.data.pqx, 0, 20.0);
+            StringBuilder sb = new StringBuilder();
+            sb.append("{\"type\":\"FeatureCollection\",\"features\":[");
+            boolean isFirst = true;
+
+            // 1. 主线
+            String mainJson = createLineJson(app.data.pqx, "main");
+            if (!mainJson.isEmpty()) {
+                sb.append(mainJson);
+                isFirst = false;
+            }
+
+            // 2. 其它线路
+            if (app.data.extraRoads != null) {
+                for (MapRoadData extra : app.data.extraRoads) {
+                    String extraJson = createLineJson(extra.pqx, "extra");
+                    if (!extraJson.isEmpty()) {
+                        if (!isFirst) sb.append(",");
+                        sb.append(extraJson);
+                        isFirst = false;
+                    }
+                }
+            }
+            sb.append("]}");
+            return sb.toString();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private String createLineJson(double[][] pqx, String type) {
+        try {
+            List<double[]> route = LL.dantiaoxianlu(pqx, 0, 20.0);
             if (route.isEmpty()) return "";
 
             StringBuilder sb = new StringBuilder();
-            sb.append("{\"type\":\"FeatureCollection\",\"features\":[{\"type\":\"Feature\",\"properties\":{},\"geometry\":{\"type\":\"LineString\",\"coordinates\":[");
+            sb.append("{\"type\":\"Feature\",\"properties\":{\"type\":\"").append(type).append("\"},\"geometry\":{\"type\":\"LineString\",\"coordinates\":[");
 
             double[][] lonlat = app.data.controlLonLat;
             double[][] xy = app.data.controlXy;
+            if (lonlat == null || lonlat.length == 0) return "";
+
             double center = 0.0;
             for (double[] ll : lonlat) center += ll[0];
             center = center / lonlat.length;
@@ -149,7 +186,7 @@ public class Map3DActivity extends Activity {
                 if (i > 0) sb.append(",");
                 sb.append("[").append(lb[0]).append(",").append(lb[1]).append("]");
             }
-            sb.append("]}}]}");
+            sb.append("]}}");
             return sb.toString();
         } catch (Exception e) {
             return "";
