@@ -1,12 +1,16 @@
 package com.hdm;
 
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
+import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -21,6 +25,20 @@ public class LayoutActivity extends BaseNavActivity {
     private LayoutView sectionView;
     private LinearLayout content;
 
+    // RTK 持续跟随
+    private Switch switchRtk;
+    private Handler rtkHandler = new Handler(Looper.getMainLooper());
+    private Runnable rtkUpdateRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (switchRtk.isChecked() && app.hasRtkData && app.currentRtkFix > 0) {
+                doRtkLayout();
+            }
+            // 每 1 秒更新一次
+            rtkHandler.postDelayed(this, 1000);
+        }
+    };
+
     @Override
     protected String currentTab() { return "layout"; }
 
@@ -34,7 +52,7 @@ public class LayoutActivity extends BaseNavActivity {
 
         content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(20), dp(20), dp(20), dp(20));
+        content.setPadding(dp(16), dp(16), dp(16), dp(16));
         setContent(content);
         
         initUI();
@@ -55,6 +73,34 @@ public class LayoutActivity extends BaseNavActivity {
             return;
         }
 
+        // ================= 顶部：持续跟随开关 =================
+        LinearLayout topRow = new LinearLayout(this);
+        topRow.setOrientation(LinearLayout.HORIZONTAL);
+        topRow.setGravity(Gravity.CENTER_VERTICAL);
+        topRow.setPadding(0, 0, 0, dp(8));
+
+        switchRtk = new Switch(this);
+        switchRtk.setText("持续跟随 RTK 自动放样");
+        switchRtk.setTextSize(14);
+        switchRtk.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            @Override
+            public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+                if (isChecked) {
+                    if (!app.rtkConnected) {
+                        Toast.makeText(LayoutActivity.this, "请先在地图页连接 RTK", Toast.LENGTH_SHORT).show();
+                        switchRtk.setChecked(false);
+                        return;
+                    }
+                    rtkHandler.post(rtkUpdateRunnable);
+                    tvResult.setText("正在实时接收 RTK 数据...");
+                } else {
+                    rtkHandler.removeCallbacks(rtkUpdateRunnable);
+                }
+            }
+        });
+        topRow.addView(switchRtk);
+        content.addView(topRow);
+
         // ================= 输入区 =================
         LinearLayout inputRow = new LinearLayout(this);
         inputRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -72,7 +118,7 @@ public class LayoutActivity extends BaseNavActivity {
         etZ.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         inputRow.addView(etZ);
 
-        // 新增：RTK 按钮
+        // 单次获取 RTK 按钮
         Button btnRtk = new Button(this);
         btnRtk.setText("RTK");
         btnRtk.setTextSize(12);
@@ -81,7 +127,7 @@ public class LayoutActivity extends BaseNavActivity {
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         inputRow.addView(btnRtk);
 
-        // 原有：计算按钮
+        // 手动放样计算按钮
         Button btnCalc = new Button(this); 
         btnCalc.setText("放样");
         btnCalc.setPadding(dp(8), 0, dp(8), 0);
@@ -128,47 +174,50 @@ public class LayoutActivity extends BaseNavActivity {
                     double x = Double.parseDouble(etX.getText().toString().trim());
                     double y = Double.parseDouble(etY.getText().toString().trim());
                     double z = Double.parseDouble(etZ.getText().toString().trim());
-                    doLayout(x, y, z);
+                    doLayout(x, y, z, false);
                 } catch (Exception e) {
                     Toast.makeText(LayoutActivity.this, "输入格式错误", Toast.LENGTH_SHORT).show();
                 }
             }
         });
 
-        // 新增：RTK 获取逻辑
+        // 单次 RTK 获取
         btnRtk.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                MyApp app = (MyApp) getApplication();
                 if (!app.hasRtkData || app.currentRtkFix == 0) {
-                    Toast.makeText(LayoutActivity.this, "未收到 RTK 信号，请先在地图页面连接 RTK", Toast.LENGTH_LONG).show();
+                    Toast.makeText(LayoutActivity.this, "未收到 RTK 信号", Toast.LENGTH_SHORT).show();
                     return;
                 }
-
-                // 将 RTK 的经纬度转换成工程坐标
-                double[] xy = Projection.gps2Xy(app.currentRtkLon, app.currentRtkLat, 
-                        app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
-                
-                if (xy == null || xy.length < 2) {
-                    Toast.makeText(LayoutActivity.this, "坐标转换失败，请检查控制点配置", Toast.LENGTH_SHORT).show();
-                    return;
-                }
-
-                // 填入输入框
-                etX.setText(String.format("%.3f", xy[0]));
-                etY.setText(String.format("%.3f", xy[1]));
-                etZ.setText(String.format("%.3f", app.currentRtkAlt)); // 暂用 RTK 椭球高，视工程需求可加高程异常改正
-
-                // 自动触发计算
-                doLayout(xy[0], xy[1], app.currentRtkAlt);
-                
-                String fixStr = app.currentRtkFix == 4 ? "固定解" : "浮点解";
-                Toast.makeText(LayoutActivity.this, "已获取 RTK " + fixStr + " 坐标", Toast.LENGTH_SHORT).show();
+                doRtkLayout();
+                Toast.makeText(LayoutActivity.this, "已获取单次 RTK 坐标", Toast.LENGTH_SHORT).show();
             }
         });
     }
 
-    private void doLayout(double x, double y, double z) {
+    // 提取 RTK 获取并计算的逻辑，供按钮和定时器共用
+    private void doRtkLayout() {
+        // 将 RTK 的经纬度转换成工程坐标
+        double[] xy = Projection.gps2Xy(app.currentRtkLon, app.currentRtkLat, 
+                app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
+        
+        if (xy == null || xy.length < 2) return;
+
+        // ====== 应用 RTK 点校正偏移量 ======
+        xy[0] += app.rtkOffsetX;
+        xy[1] += app.rtkOffsetY;
+        // ===================================
+
+        // 填入输入框 (实时显示当前 RTK 测得的工程坐标)
+        etX.setText(String.format("%.3f", xy[0]));
+        etY.setText(String.format("%.3f", xy[1]));
+        etZ.setText(String.format("%.3f", app.currentRtkAlt)); 
+
+        // 触发计算 (传入 true 表示来自 RTK 自动刷新，不弹出 Toast 打扰)
+        doLayout(xy[0], xy[1], app.currentRtkAlt, true);
+    }
+
+    private void doLayout(double x, double y, double z, boolean isFromRtk) {
         double[] kb = LL.hua_Fs(app.data.pqx, x, y);
         double k = kb[0], b = kb[1];
 
@@ -238,6 +287,11 @@ public class LayoutActivity extends BaseNavActivity {
         }
 
         StringBuilder sb = new StringBuilder();
+        if (isFromRtk) {
+            String fixStr = app.currentRtkFix == 4 ? "固定解" : "浮点解";
+            sb.append("【RTK ").append(fixStr).append(" 实时跟随】\n");
+        }
+        
         sb.append("桩号: ").append(LL.hua_Num2K(k)).append("\n");
         sb.append("偏距: ").append(String.format("%.3f", b)).append(" m（").append(isLeft ? "左" : "右").append("）\n");
         sb.append("判断: ").append(isLeft ? "左" : "右").append(isFill ? "填方" : "挖方").append("\n");
@@ -261,5 +315,21 @@ public class LayoutActivity extends BaseNavActivity {
         sectionView.setLayoutSlope(slope);
         sectionView.setLayoutResult(designY, hasHorizontal ? horizontalMove : null);
         sectionView.setMarker(new double[]{b, z});
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // 页面回到前台时，如果开关处于开启状态，恢复定时器
+        if (switchRtk != null && switchRtk.isChecked()) {
+            rtkHandler.post(rtkUpdateRunnable);
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        // 离开页面立刻暂停轮询，节约电量
+        rtkHandler.removeCallbacks(rtkUpdateRunnable);
     }
 }

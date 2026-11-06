@@ -51,7 +51,7 @@ public class RealMapActivity extends BaseNavActivity {
     private LocationManager lm;
     private LocationListener listener;
     private static final int REQ_LOCATION = 200;
-    private static final int REQ_BLUETOOTH = 201; // 新增蓝牙权限请求码
+    private static final int REQ_BLUETOOTH = 201;
 
     private SensorManager sensorManager;
     private Sensor rotationSensor;
@@ -71,7 +71,6 @@ public class RealMapActivity extends BaseNavActivity {
 
     private AlertDialog settingsDialog; 
     
-    // RTK 状态
     private String rtkStatus = "未连接";
     private TextView tvRtkStatus;
 
@@ -106,7 +105,6 @@ public class RealMapActivity extends BaseNavActivity {
         if (lm != null && listener == null) startGps();
     }
 
-    // ================= 初始化 RTK 回调 =================
     private void setupRtk() {
         app.rtkManager.setCallback(new BluetoothRtkManager.RtkCallback() {
             @Override
@@ -116,24 +114,29 @@ public class RealMapActivity extends BaseNavActivity {
                 app.currentRtkAlt = alt;
                 app.currentRtkFix = fixQuality;
                 app.hasRtkData = true;
+                app.rtkConnected = true; 
 
                 String fixStr = fixQuality == 4 ? "固定解" : (fixQuality == 5 ? "浮点解" : "单点");
                 rtkStatus = "RTK " + fixStr;
                 if (tvRtkStatus != null) tvRtkStatus.setText(rtkStatus);
 
-                // 用 RTK 的坐标更新地图
                 updateMapLocation(lat, lon);
             }
 
             @Override
             public void onRtkStatus(String status) {
                 rtkStatus = status;
+                if (status.startsWith("已连接")) {
+                    app.rtkConnected = true;
+                } else if (status.equals("未连接") || status.equals("连接失败") || status.equals("连接断开")) {
+                    app.rtkConnected = false;
+                    app.hasRtkData = false;
+                }
                 if (tvRtkStatus != null) tvRtkStatus.setText(rtkStatus);
             }
         });
     }
 
-    // 解析并更新地图 UI 的核心逻辑抽离
     private void updateMapLocation(double lat, double lon) {
         if (app.data == null || allRoadsList.isEmpty() || mapView == null) return;
         
@@ -142,11 +145,15 @@ public class RealMapActivity extends BaseNavActivity {
         double[] xy = Projection.gps2Xy(lon, lat, app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
         if (xy == null || xy.length < 2) return;
 
+        if (app.hasRtkData && app.currentRtkFix > 0) {
+            xy[0] += app.rtkOffsetX;
+            xy[1] += app.rtkOffsetY;
+        }
+
         double[] kb = LL.hua_Fs(currentRoad.pqx, xy[0], xy[1]);
         String stationStr = kb[0] < 0 ? "超出范围" : LL.hua_Num2K(kb[0]);
         String offsetStr = kb[0] < 0 ? "--" : String.format("%.3f m (%s)", Math.abs(kb[1]), kb[1] < 0 ? "左" : "右");
 
-        // 叠加 RTK 状态显示
         if (app.hasRtkData && app.currentRtkFix > 0) {
             stationStr += " [RTK]";
         }
@@ -177,9 +184,7 @@ public class RealMapActivity extends BaseNavActivity {
                 FileOutputStream fos = new FileOutputStream(file);
                 fos.write(defaultTxt.getBytes("UTF-8"));
                 fos.close();
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
+            } catch (Exception e) {}
         }
 
         try {
@@ -191,20 +196,15 @@ public class RealMapActivity extends BaseNavActivity {
                 if (line.isEmpty() || line.startsWith("#")) continue;
                 String[] parts = line.split(",");
                 if (parts.length >= 2) {
-                    String name = parts[0].trim();
-                    String url = parts[1].trim();
-                    sources.add(new MapSource(name, url));
+                    sources.add(new MapSource(parts[0].trim(), parts[1].trim()));
                 }
             }
             br.close();
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        
+        } catch (Exception e) {}
+
         if (sources.isEmpty()) {
             sources.add(new MapSource("谷歌路网", "https://mt1.google.com/vt/lyrs=r&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}"));
         }
-        
         return sources;
     }
 
@@ -252,7 +252,6 @@ public class RealMapActivity extends BaseNavActivity {
         btnMenu.setLayoutParams(lpMenu);
         mapBox.addView(btnMenu);
 
-        // ====== RTK 状态显示框 ======
         tvRtkStatus = new TextView(this);
         tvRtkStatus.setText(rtkStatus);
         tvRtkStatus.setTextSize(12);
@@ -348,6 +347,10 @@ public class RealMapActivity extends BaseNavActivity {
         btnMenu.setOnClickListener(v -> showSettingsDialog());
         btnFitAll.setOnClickListener(v -> mapView.zoomToFitAll());
         btnLocate.setOnClickListener(v -> {
+            if (app.rtkConnected) {
+                if (mapView != null) mapView.locateMe();
+                return;
+            }
             if (lm != null && !lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
                 Toast.makeText(RealMapActivity.this, "请先打开手机的GPS定位服务", Toast.LENGTH_LONG).show();
                 startActivity(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS));
@@ -406,7 +409,6 @@ public class RealMapActivity extends BaseNavActivity {
         title.setTextColor(0xFF333333);
         layout.addView(title);
 
-        // ================= 蓝牙 RTK 连接 =================
         TextView btnRtk = new TextView(this);
         btnRtk.setText("连接蓝牙 RTK (当前: " + rtkStatus + ")");
         btnRtk.setTextSize(16);
@@ -414,6 +416,14 @@ public class RealMapActivity extends BaseNavActivity {
         btnRtk.setPadding(0, dp(16), 0, dp(16));
         btnRtk.setOnClickListener(v -> checkAndRequestBluetooth());
         layout.addView(btnRtk);
+
+        TextView btnCorrection = new TextView(this);
+        btnCorrection.setText("RTK 点校正 (当前偏移: X=" + String.format("%.3f", app.rtkOffsetX) + ", Y=" + String.format("%.3f", app.rtkOffsetY) + ")");
+        btnCorrection.setTextSize(16);
+        btnCorrection.setTextColor(0xFFD32F2F); 
+        btnCorrection.setPadding(0, 0, 0, dp(16));
+        btnCorrection.setOnClickListener(v -> showCorrectionDialog());
+        layout.addView(btnCorrection);
         
         View line0 = new View(this);
         line0.setBackgroundColor(0xFFEEEEEE);
@@ -563,7 +573,221 @@ public class RealMapActivity extends BaseNavActivity {
         settingsDialog.show();
     }
 
-    // ================= 动态申请蓝牙权限 =================
+    // ================= RTK 点校正对话框 =================
+    private void showCorrectionDialog() {
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(dp(20), dp(20), dp(20), dp(20));
+
+        TextView tvTips = new TextView(this);
+        tvTips.setText("将 RTK 杆放在已知控制点上，点击“读取当前RTK”填入当前坐标，再输入该控制点的设计(X,Y)坐标，点击保存即可算出平移量。");
+        tvTips.setTextSize(14);
+        tvTips.setTextColor(0xFF666666);
+        layout.addView(tvTips);
+
+        // 输入框：当前 RTK 坐标
+        LinearLayout row1 = new LinearLayout(this);
+        row1.setOrientation(LinearLayout.HORIZONTAL);
+        row1.setPadding(0, dp(16), 0, dp(8));
+        TextView tv1 = new TextView(this); tv1.setText("当前RTK: "); tv1.setTextSize(16);
+        row1.addView(tv1);
+        final EditText etCurX = new EditText(this); etCurX.setHint("X"); etCurX.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED);
+        etCurX.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)); row1.addView(etCurX);
+        final EditText etCurY = new EditText(this); etCurY.setHint("Y"); etCurY.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED);
+        etCurY.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)); row1.addView(etCurY);
+        layout.addView(row1);
+
+        // 读取当前 RTK 按钮
+        TextView btnRead = new TextView(this);
+        btnRead.setText("↺ 读取当前 RTK 平面坐标");
+        btnRead.setTextColor(0xFF0078D4);
+        btnRead.setTextSize(14);
+        btnRead.setPadding(0, 0, 0, dp(16));
+        btnRead.setOnClickListener(v -> {
+            if (!app.hasRtkData || app.currentRtkFix == 0) {
+                Toast.makeText(this, "未收到 RTK 信号", Toast.LENGTH_SHORT).show(); return;
+            }
+            double[] xy = Projection.gps2Xy(app.currentRtkLon, app.currentRtkLat, app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
+            if (xy != null && xy.length >= 2) {
+                etCurX.setText(String.format("%.3f", xy[0]));
+                etCurY.setText(String.format("%.3f", xy[1]));
+            }
+        });
+        layout.addView(btnRead);
+
+        // 输入框：已知点坐标
+        LinearLayout row2 = new LinearLayout(this);
+        row2.setOrientation(LinearLayout.HORIZONTAL);
+        row2.setPadding(0, 0, 0, dp(16));
+        TextView tv2 = new TextView(this); tv2.setText("已知点值: "); tv2.setTextSize(16);
+        row2.addView(tv2);
+        final EditText etTarX = new EditText(this); etTarX.setHint("设计 X"); etTarX.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED);
+        etTarX.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)); row2.addView(etTarX);
+        final EditText etTarY = new EditText(this); etTarY.setHint("设计 Y"); etTarY.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED);
+        etTarY.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)); row2.addView(etTarY);
+        layout.addView(row2);
+
+        // ================= 新增：读取控制点文件 =================
+        File ctrlFile = new File(Environment.getExternalStorageDirectory(), "1hdm/控制点.txt");
+        final List<String> ctrlNames = new ArrayList<>();
+        final List<double[]> ctrlCoords = new ArrayList<>();
+
+        if (ctrlFile.exists()) {
+            try {
+                FileInputStream fis = new FileInputStream(ctrlFile);
+                BufferedReader br = new BufferedReader(new InputStreamReader(fis, "UTF-8"));
+                String line;
+                while ((line = br.readLine()) != null) {
+                    line = line.trim();
+                    if (line.isEmpty() || line.startsWith("#")) continue;
+                    String[] parts = line.split(",");
+                    if (parts.length >= 3) {
+                        ctrlNames.add(parts[0].trim());
+                        double x = Double.parseDouble(parts[1].trim());
+                        double y = Double.parseDouble(parts[2].trim());
+                        ctrlCoords.add(new double[]{x, y});
+                    }
+                }
+                br.close();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+
+        if (!ctrlNames.isEmpty()) {
+            TextView btnSelectCtrl = new TextView(this);
+            btnSelectCtrl.setText("↓ 从 控制点.txt 选择 (共" + ctrlNames.size() + "个)");
+            btnSelectCtrl.setTextColor(0xFF0078D4);
+            btnSelectCtrl.setTextSize(14);
+            btnSelectCtrl.setPadding(0, 0, 0, dp(16));
+            btnSelectCtrl.setOnClickListener(v -> {
+                new AlertDialog.Builder(this)
+                        .setTitle("选择已知控制点")
+                        .setItems(ctrlNames.toArray(new String[0]), (dialog, which) -> {
+                            etTarX.setText(String.format("%.3f", ctrlCoords.get(which)[0]));
+                            etTarY.setText(String.format("%.3f", ctrlCoords.get(which)[1]));
+                        })
+                        .show();
+            });
+            layout.addView(btnSelectCtrl);
+        } else {
+            TextView tvNoCtrl = new TextView(this);
+            tvNoCtrl.setText("(未发现 1hdm/控制点.txt，可手动输入)");
+            tvNoCtrl.setTextColor(0xFF999999);
+            tvNoCtrl.setTextSize(12);
+            tvNoCtrl.setPadding(0, 0, 0, dp(16));
+            layout.addView(tvNoCtrl);
+        }
+        // ========================================================
+
+        // ================= 新增：改正数显示与手动输入 =================
+        View lineDiv = new View(this);
+        lineDiv.setBackgroundColor(0xFFEEEEEE);
+        layout.addView(lineDiv, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
+
+        LinearLayout row3 = new LinearLayout(this);
+        row3.setOrientation(LinearLayout.HORIZONTAL);
+        row3.setPadding(0, dp(16), 0, dp(8));
+        TextView tv3 = new TextView(this); tv3.setText("改正数: "); tv3.setTextSize(16); tv3.setTextColor(0xFFD32F2F);
+        row3.addView(tv3);
+        final EditText etDX = new EditText(this); etDX.setHint("ΔX"); etDX.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED);
+        etDX.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)); row3.addView(etDX);
+        final EditText etDY = new EditText(this); etDY.setHint("ΔY"); etDY.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED);
+        etDY.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)); row3.addView(etDY);
+        layout.addView(row3);
+
+        // 初始化当前的偏移量
+        etDX.setText(String.format("%.3f", app.rtkOffsetX));
+        etDY.setText(String.format("%.3f", app.rtkOffsetY));
+
+        // 双向绑定逻辑
+        final boolean[] isUpdating = {false};
+        
+        // 监听 当前值和设计值，自动算改正数
+        TextWatcher valWatcher = new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override public void afterTextChanged(Editable s) {
+                if (isUpdating[0]) return;
+                isUpdating[0] = true;
+                try {
+                    double cx = etCurX.getText().toString().isEmpty() || etCurX.getText().toString().equals("-") ? 0 : Double.parseDouble(etCurX.getText().toString());
+                    double cy = etCurY.getText().toString().isEmpty() || etCurY.getText().toString().equals("-") ? 0 : Double.parseDouble(etCurY.getText().toString());
+                    double tx = etTarX.getText().toString().isEmpty() || etTarX.getText().toString().equals("-") ? 0 : Double.parseDouble(etTarX.getText().toString());
+                    double ty = etTarY.getText().toString().isEmpty() || etTarY.getText().toString().equals("-") ? 0 : Double.parseDouble(etTarY.getText().toString());
+                    etDX.setText(String.format("%.3f", tx - cx));
+                    etDY.setText(String.format("%.3f", ty - cy));
+                } catch (Exception e) {}
+                isUpdating[0] = false;
+            }
+        };
+        etCurX.addTextChangedListener(valWatcher);
+        etCurY.addTextChangedListener(valWatcher);
+        etTarX.addTextChangedListener(valWatcher);
+        etTarY.addTextChangedListener(valWatcher);
+
+        // 监听改正数，反推设计值
+        TextWatcher offsetWatcher = new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override public void afterTextChanged(Editable s) {
+                if (isUpdating[0]) return;
+                isUpdating[0] = true;
+                try {
+                    double cx = etCurX.getText().toString().isEmpty() || etCurX.getText().toString().equals("-") ? 0 : Double.parseDouble(etCurX.getText().toString());
+                    double cy = etCurY.getText().toString().isEmpty() || etCurY.getText().toString().equals("-") ? 0 : Double.parseDouble(etCurY.getText().toString());
+                    double dx = etDX.getText().toString().isEmpty() || etDX.getText().toString().equals("-") ? 0 : Double.parseDouble(etDX.getText().toString());
+                    double dy = etDY.getText().toString().isEmpty() || etDY.getText().toString().equals("-") ? 0 : Double.parseDouble(etDY.getText().toString());
+                    etTarX.setText(String.format("%.3f", cx + dx));
+                    etTarY.setText(String.format("%.3f", cy + dy));
+                } catch (Exception e) {}
+                isUpdating[0] = false;
+            }
+        };
+        etDX.addTextChangedListener(offsetWatcher);
+        etDY.addTextChangedListener(offsetWatcher);
+        // ========================================================
+
+        new AlertDialog.Builder(this)
+                .setTitle("RTK 单点平移校正")
+                .setView(layout)
+                .setPositiveButton("保存校正", (dialog, which) -> {
+                    try {
+                        // 这里直接读取改正数，因为在双向绑定中，改正数已经被算好了
+                        double dx = etDX.getText().toString().isEmpty() ? 0 : Double.parseDouble(etDX.getText().toString());
+                        double dy = etDY.getText().toString().isEmpty() ? 0 : Double.parseDouble(etDY.getText().toString());
+
+                        app.rtkOffsetX = dx;
+                        app.rtkOffsetY = dy;
+                        
+                        getSharedPreferences("hdm_config", MODE_PRIVATE).edit()
+                                .putFloat("rtk_offset_x", (float) app.rtkOffsetX)
+                                .putFloat("rtk_offset_y", (float) app.rtkOffsetY).apply();
+
+                        Toast.makeText(this, "校正成功！偏移已保存", Toast.LENGTH_SHORT).show();
+                        
+                        if (app.hasRtkData) updateMapLocation(app.currentRtkLat, app.currentRtkLon);
+                        
+                        if (settingsDialog != null) settingsDialog.dismiss();
+
+                    } catch (Exception e) {
+                        Toast.makeText(this, "输入格式错误", Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .setNeutralButton("清除校正", (dialog, which) -> {
+                    app.rtkOffsetX = 0;
+                    app.rtkOffsetY = 0;
+                    getSharedPreferences("hdm_config", MODE_PRIVATE).edit()
+                            .putFloat("rtk_offset_x", 0f)
+                            .putFloat("rtk_offset_y", 0f).apply();
+                    Toast.makeText(this, "已清除校正", Toast.LENGTH_SHORT).show();
+                    if (app.hasRtkData) updateMapLocation(app.currentRtkLat, app.currentRtkLon);
+                    if (settingsDialog != null) settingsDialog.dismiss();
+                })
+                .show();
+    }
+
     private void checkAndRequestBluetooth() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED ||
@@ -578,7 +802,6 @@ public class RealMapActivity extends BaseNavActivity {
         showRtkDeviceDialog();
     }
 
-    // ================= 扫描并连接蓝牙设备 =================
     private void showRtkDeviceDialog() {
         BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
         if (adapter == null) {
@@ -591,7 +814,6 @@ public class RealMapActivity extends BaseNavActivity {
         }
 
         try {
-            // 获取已配对设备
             Set<BluetoothDevice> pairedDevices = adapter.getBondedDevices();
             List<String> deviceNames = new ArrayList<>();
             List<BluetoothDevice> devices = new ArrayList<>();
@@ -610,6 +832,8 @@ public class RealMapActivity extends BaseNavActivity {
                         if (which == 0) {
                             app.rtkManager.disconnect();
                             rtkStatus = "未连接";
+                            app.rtkConnected = false;
+                            app.hasRtkData = false;
                             if (tvRtkStatus != null) tvRtkStatus.setText(rtkStatus);
                         } else {
                             app.rtkManager.connect(devices.get(which));
@@ -709,8 +933,7 @@ public class RealMapActivity extends BaseNavActivity {
         listener = new LocationListener() {
             @Override
             public void onLocationChanged(Location loc) {
-                // 如果没有 RTK 数据，才使用手机自带 GPS
-                if (!app.hasRtkData || app.currentRtkFix == 0) {
+                if (!app.rtkConnected && !app.hasRtkData) {
                     final double lon = loc.getLongitude();
                     final double lat = loc.getLatitude();
                     updateMapLocation(lat, lon);
