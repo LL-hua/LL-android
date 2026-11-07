@@ -1,9 +1,16 @@
 chmod +x build.sh
 
+# 1. 提交代码
 git add .
-git commit -m "fix: 20206/10/30"
+git commit -m "feat: 新增控制点地图可视化与抽稀，点校正支持手机GPS平滑采样及蓝点同步平移"
 git push origin main
 
+# 2. 编译打包
+./build.sh
 
-gh release create v1.0.1 app/build/outputs/apk/release/app-release.apk -t "20206/10/30"
-
+# 3. 发布新版本 (版本号升到 v2.2.1 或 v2.3.0 都可以)
+gh release create v2.2.2 app/build/outputs/apk/release/app-release.apk -t "hdm 测量神器 v2.2.1 (控制点可视化版)" -n "### 🛠️ 更新说明
+- **控制点可视化**：支持在在线地图上叠加显示 1hdm/控制点.txt，带智能抽稀与自适应字号，一目了然。
+- **点校正全面升级**：支持在没有 RTK 时使用手机 GPS 进行点校正，引入 10 次平滑采样求平均，大幅提高校正基准的稳定性。
+- **底图位移联动**：修复了输入平移参数后，计算数值变化但地图蓝点未移动的问题，现已实现蓝点与工程坐标同步平移。
+- **极致轻量**：在包含所有上述可视化与测量功能的情况下，APK 体积依然保持在 80KB 左右。"
