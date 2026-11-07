@@ -814,25 +814,37 @@ public class CanvasMapView extends View {
             // 4. 画文字
             // 4. 画文字
             if (showCadText) {
+                // 计算当前屏幕 1 像素代表多少米
+                double metersPerScreenPixel = 156543.03392 * Math.cos(centerLat * Math.PI / 180.0)
+                        / (Math.pow(2, tileZoom) * totalScale);
+
                 for (Object[] txt : cadGeoTexts) {
                     double lat = (Double) txt[0];
                     double lng = (Double) txt[1];
                     String text = (String) txt[2];
-                    double cadTextH = (Double) txt[3];
+                    double cadTextH = (Double) txt[3]; // CAD 真实字高（单位：米）
                     double rot = (Double) txt[4];
+
+                    if (text == null || text.trim().isEmpty()) continue;
+
+                    // 将 CAD 字高（米）转换为当前屏幕像素
+                    float textSizePx = (float) (cadTextH / metersPerScreenPixel);
+
+                    // 核心：如果算出来的字高小于 10 像素，直接不画！
+                    // 因为 10 像素以下的字会糊成一团，并且极大地拖慢渲染速度。
+                    // 当你双指放大时，textSizePx 自然会变大，字就会浮现出来。
+                    if (textSizePx < 10f) {
+                        continue;
+                    }
+
+                    cadTextPaint.setTextSize(textSizePx);
 
                     double[] px = latLngToWorldPixel(lat, lng, tileZoom);
                     float cx = (float) ((px[0] - startX) * totalScale);
                     float cy = (float) ((px[1] - startY) * totalScale);
 
-                    // 文字大小根据 CAD 字高缩放
-                    float textSizePx = (float) (cadTextH / 111000.0 * 256 * Math.pow(2, tileZoom) * totalScale);
-                    if (textSizePx < 15) textSizePx = 15; // 最小限制一下，不然看不见
-                    cadTextPaint.setTextSize(textSizePx);
-
                     canvas.save();
                     canvas.translate(cx, cy);
-                    // CAD 逆时针为正，Android Canvas 顺时针为正，所以要取反
                     canvas.rotate((float) -Math.toDegrees(rot));
                     canvas.drawText(text, 0, 0, cadTextPaint);
                     canvas.restore();
