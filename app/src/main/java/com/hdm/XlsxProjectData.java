@@ -44,7 +44,8 @@ public class XlsxProjectData {
         data.leftCrossfalls, data.rightCrossfalls,
         data.leftStructures, data.rightStructures,
         data.config.clearDepth);
-
+data.rawXyz = xyz; // 保存原始点云
+data.switchRoad(data.pqx); // 默认初始化主线
         return data;
     }
 
@@ -351,6 +352,7 @@ public class XlsxProjectData {
 }
 
 /// 项目数据 + 计算器
+/// 项目数据 + 计算器
 class ProjectData {
     public AppConfig config;
     public double[][] pqx, sqx, kzb, mesh;
@@ -367,8 +369,31 @@ class ProjectData {
     public double[][] controlLonLat; 
     public double[][] controlXy; 
 
-    // 新增：其它线路
     public List<MapRoadData> extraRoads = new ArrayList<>();
+
+    // ===== 新增：支持动态切换路线 =====
+    public double[][] rawXyz; 
+    public double[][] currentPqx; // 当前选中的路线
+    public SectionCalculator currentCalculator; // 当前路线的计算器
+
+    public void switchRoad(double[][] targetPqx) {
+        if (targetPqx == pqx) {
+            this.currentPqx = pqx;
+            this.currentCalculator = calculator;
+        } else {
+            // 如果是支线，用原始的xyz重新反算mesh，并生成新的计算器
+            double[][] newMesh = LL.hua_Fs_Batch(targetPqx, rawXyz);
+            this.currentPqx = targetPqx;
+            this.currentCalculator = new SectionCalculator(
+                newMesh, targetPqx, sqx,
+                leftWidths, rightWidths, slopeData,
+                leftCrossfalls, rightCrossfalls,
+                leftStructures, rightStructures,
+                config.clearDepth
+            );
+        }
+    }
+    // ===================================
 
     public ComputeResult Query(double station) { return calculator.Compute(station); }
     public double[] Stations() {
@@ -377,7 +402,6 @@ class ProjectData {
         return arr;
     }
 }
-
 // ============================================================
 // .xlsx 读取器（ZIP + XML）—— Android 兼容版
 // ============================================================

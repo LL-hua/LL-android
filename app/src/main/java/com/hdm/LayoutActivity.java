@@ -218,7 +218,7 @@ public class LayoutActivity extends BaseNavActivity {
     }
 
     private void doLayout(double x, double y, double z, boolean isFromRtk) {
-        double[] kb = LL.hua_Fs(app.data.pqx, x, y);
+        double[] kb = LL.hua_Fs(app.data.currentPqx, x, y);
         double k = kb[0], b = kb[1];
 
         if (k < 0) { tvResult.setText("桩号超出线路范围"); return; }
@@ -332,4 +332,14 @@ public class LayoutActivity extends BaseNavActivity {
         // 离开页面立刻暂停轮询，节约电量
         rtkHandler.removeCallbacks(rtkUpdateRunnable);
     }
+    
+    @Override
+protected void onRoadChanged() {
+    try {
+        double x = Double.parseDouble(etX.getText().toString().trim());
+        double y = Double.parseDouble(etY.getText().toString().trim());
+        double z = Double.parseDouble(etZ.getText().toString().trim());
+        doLayout(x, y, z, false);
+    } catch (Exception ignored) {}
+}
 }

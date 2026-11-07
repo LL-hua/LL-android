@@ -19,28 +19,27 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.File;
-import java.io.FileOutputStream;
-import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 
 public abstract class BaseNavActivity extends Activity {
 
-    // 核心：删掉"平面图"，只留 4 个
-    protected static final String[] TAB_KEYS   = {"earth", "layout", "calc", "realmap"};
+    protected static final String[] TAB_KEYS = {"earth", "layout", "calc", "realmap"};
     protected static final String[] TAB_LABELS = {"土方", "放样", "正反算", "在线地图"};
-    protected static final String[] TAB_ICONS  = {"土", "放", "算", "地"};
+    protected static final String[] TAB_ICONS = {"土", "放", "算", "地"};
 
-    private static final int COLOR_PRIMARY  = 0xFF1976D2;
-    private static final int COLOR_NAV_BG   = 0xFFFFFFFF;
+    private static final int COLOR_PRIMARY = 0xFF1976D2;
+    private static final int COLOR_NAV_BG = 0xFFFFFFFF;
     private static final int COLOR_NAV_LINE = 0xFFE0E0E0;
-    private static final int COLOR_TAB_ON   = 0xFF1976D2;
-    private static final int COLOR_TAB_OFF  = 0xFF9E9E9E;
+    private static final int COLOR_TAB_ON = 0xFF1976D2;
+    private static final int COLOR_TAB_OFF = 0xFF9E9E9E;
 
     protected FrameLayout contentBox;
     protected TextView tvProj;
+    protected TextView tvRoad; // 新增：路线显示
 
     protected abstract String currentTab();
+
     protected abstract String pageTitle();
 
     @Override
@@ -73,26 +72,29 @@ public abstract class BaseNavActivity extends Activity {
         tvTitle.setTextColor(Color.WHITE);
         header.addView(tvTitle);
 
+        // 新增：路线显示按钮
+        tvRoad = new TextView(this);
+        tvRoad.setTextSize(13);
+        tvRoad.setTextColor(0xCCFFFFFF);
+        tvRoad.setPadding(dp(12), 0, 0, 0);
+        tvRoad.setOnClickListener(v -> showRoadDialog());
+        header.addView(tvRoad);
+
         tvProj = new TextView(this);
-        updateProjName();
+        updateHeaderNames();
         tvProj.setTextSize(13);
         tvProj.setTextColor(0xCCFFFFFF);
         tvProj.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
         tvProj.setLayoutParams(new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        tvProj.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                showProjectDialog();
-            }
-        });
+        0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        tvProj.setOnClickListener(v -> showProjectDialog());
         header.addView(tvProj);
 
         rootLayout.addView(header);
 
         contentBox = new FrameLayout(this);
         contentBox.setLayoutParams(new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+        LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
         rootLayout.addView(contentBox);
 
         rootLayout.addView(buildBottomNav());
@@ -105,8 +107,8 @@ public abstract class BaseNavActivity extends Activity {
     protected void setContent(View view) {
         contentBox.removeAllViews();
         contentBox.addView(view, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT));
+        FrameLayout.LayoutParams.MATCH_PARENT,
+        FrameLayout.LayoutParams.MATCH_PARENT));
     }
 
     private void autoLoadLastProject() {
@@ -120,11 +122,11 @@ public abstract class BaseNavActivity extends Activity {
         }
     }
 
-    // ================= 新增：复制 assets 文件到缓存 =================
+// ================= 复制 assets 文件到缓存 =================
     protected File copyAssetToCache(String assetName) {
         File file = new File(getFilesDir(), "[内置] " + assetName);
-        try (InputStream is = getAssets().open(assetName);
-             FileOutputStream fos = new FileOutputStream(file)) {
+        try (java.io.InputStream is = getAssets().open(assetName);
+                java.io.FileOutputStream fos = new java.io.FileOutputStream(file)) {
             byte[] buffer = new byte[8192];
             int len;
             while ((len = is.read(buffer)) != -1) {
@@ -146,7 +148,6 @@ public abstract class BaseNavActivity extends Activity {
         final List<File> xlsxFiles = new ArrayList<>();
         final List<String> xlsxNames = new ArrayList<>();
 
-        // 1. 扫描外部存储
         if (files != null) {
             for (File f : files) {
                 if (f.isFile() && f.getName().toLowerCase().endsWith(".xlsx")) {
@@ -156,26 +157,8 @@ public abstract class BaseNavActivity extends Activity {
             }
         }
 
-        // 2. 扫描 assets 内置项目
-        try {
-            String[] assetFiles = getAssets().list("");
-            if (assetFiles != null) {
-                for (String name : assetFiles) {
-                    if (name.toLowerCase().endsWith(".xlsx")) {
-                        File cacheFile = copyAssetToCache(name);
-                        if (cacheFile != null) {
-                            xlsxFiles.add(cacheFile);
-                            xlsxNames.add(cacheFile.getName());
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-
         if (xlsxFiles.isEmpty()) {
-            Toast.makeText(this, "请把 .xlsx 放到 /sdcard/1hdm/ 或 assets 目录", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "请把 .xlsx 放到 /sdcard/1hdm/", Toast.LENGTH_LONG).show();
             return;
         }
 
@@ -193,7 +176,7 @@ public abstract class BaseNavActivity extends Activity {
 
     private void loadProject(final File xlsxFile, final boolean isSilent) {
         if (!isSilent) tvProj.setText("加载中...");
-        
+
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -206,11 +189,11 @@ public abstract class BaseNavActivity extends Activity {
                             app.data = d;
                             app.currentProjectName = xlsxFile.getName();
                             app.currentProjectFile = xlsxFile;
-                            
+
                             SharedPreferences sp = getSharedPreferences("hdm_config", MODE_PRIVATE);
                             sp.edit().putString("last_project", xlsxFile.getAbsolutePath()).apply();
 
-                            updateProjName();
+                            updateHeaderNames();
                             if (!isSilent) {
                                 Toast.makeText(BaseNavActivity.this, "已加载: " + xlsxFile.getName(), Toast.LENGTH_SHORT).show();
                             }
@@ -221,7 +204,7 @@ public abstract class BaseNavActivity extends Activity {
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
-                            updateProjName();
+                            updateHeaderNames();
                             if (!isSilent) {
                                 Toast.makeText(BaseNavActivity.this, "加载失败: " + e.getMessage(), Toast.LENGTH_LONG).show();
                             }
@@ -232,15 +215,61 @@ public abstract class BaseNavActivity extends Activity {
         }).start();
     }
 
-    protected void updateProjName() {
-        if (tvProj == null) return;
+    protected void updateHeaderNames() {
         MyApp app = (MyApp) getApplication();
-        String projName = (app != null && app.currentProjectName != null)
-                ? app.currentProjectName : "未选择项目";
-        tvProj.setText(projName);
+        if (tvProj != null) {
+            String projName = (app != null && app.currentProjectName != null) ? app.currentProjectName : "未选择项目";
+            tvProj.setText(projName);
+        }
+        if (tvRoad != null) {
+            if (app == null || app.data == null) {
+                tvRoad.setText("");
+                return;
+            }
+            String curName = "主线";
+            if (app.data.currentPqx != app.data.pqx && app.data.extraRoads != null) {
+                for (MapRoadData rd : app.data.extraRoads) {
+                    if (rd.pqx == app.data.currentPqx) {
+                        curName = rd.name;
+                        break;
+                    }
+                }
+            }
+            tvRoad.setText("[" + curName + "]");
+        }
     }
 
     protected void onProjectLoaded() {}
+
+    protected void onRoadChanged() {} // 新增：路线切换回调
+
+    private void showRoadDialog() {
+        MyApp app = (MyApp) getApplication();
+        if (app.data == null) {
+            Toast.makeText(this, "请先选择项目", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        List<String> names = new ArrayList<>();
+        List<double[][]> pqxList = new ArrayList<>();
+
+        names.add("主线");
+        pqxList.add(app.data.pqx);
+
+        if (app.data.extraRoads != null) {
+            for (MapRoadData r : app.data.extraRoads) {
+                names.add(r.name);
+                pqxList.add(r.pqx);
+            }
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("选择当前路线")
+                .setItems(names.toArray(new String[0]), (d, which) -> {
+                    app.data.switchRoad(pqxList.get(which));
+                    updateHeaderNames();
+                    onRoadChanged();
+                }).show();
+    }
 
     private View buildBottomNav() {
         LinearLayout wrapper = new LinearLayout(this);
@@ -249,7 +278,7 @@ public abstract class BaseNavActivity extends Activity {
         View line = new View(this);
         line.setBackgroundColor(COLOR_NAV_LINE);
         wrapper.addView(line, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
+        LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
 
         LinearLayout nav = new LinearLayout(this);
         nav.setOrientation(LinearLayout.HORIZONTAL);
@@ -267,7 +296,7 @@ public abstract class BaseNavActivity extends Activity {
             item.setGravity(Gravity.CENTER);
             item.setPadding(0, dp(4), 0, dp(4));
             item.setLayoutParams(new LinearLayout.LayoutParams(
-                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
             TextView icon = new TextView(this);
             icon.setText(TAB_ICONS[i]);
@@ -291,7 +320,9 @@ public abstract class BaseNavActivity extends Activity {
 
             item.setOnClickListener(new View.OnClickListener() {
                 @Override
-                public void onClick(View v) { goTab(key); }
+                public void onClick(View v) {
+                    goTab(key);
+                }
             });
 
             nav.addView(item);
@@ -305,16 +336,15 @@ public abstract class BaseNavActivity extends Activity {
         if (key.equals(currentTab())) return;
 
         Class<?> target = null;
-        if ("earth".equals(key))   target = EarthworkActivity.class;
-        if ("layout".equals(key))  target = LayoutActivity.class;
-        if ("calc".equals(key))    target = CalcActivity.class;
+        if ("earth".equals(key)) target = EarthworkActivity.class;
+        if ("layout".equals(key)) target = LayoutActivity.class;
+        if ("calc".equals(key)) target = CalcActivity.class;
         if ("realmap".equals(key)) target = RealMapActivity.class;
-        
+
         if (target == null) return;
 
         MyApp app = (MyApp) getApplication();
-        
-        // 除了 realmap，其余必须选项目
+
         if (!"realmap".equals(key) && (app == null || app.data == null)) {
             Toast.makeText(this, "请先点击右上角选择项目", Toast.LENGTH_SHORT).show();
             return;

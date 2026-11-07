@@ -24,10 +24,14 @@ public class CalcActivity extends BaseNavActivity {
     private LinearLayout content;
 
     @Override
-    protected String currentTab() { return "calc"; }
+    protected String currentTab() {
+        return "calc";
+    }
 
     @Override
-    protected String pageTitle() { return "正反算"; }
+    protected String pageTitle() {
+        return "正反算";
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -43,7 +47,9 @@ public class CalcActivity extends BaseNavActivity {
     }
 
     @Override
-    protected void onProjectLoaded() { initUI(); }
+    protected void onProjectLoaded() {
+        initUI();
+    }
 
     private void initUI() {
         content.removeAllViews();
@@ -53,54 +59,105 @@ public class CalcActivity extends BaseNavActivity {
             tvEmpty.setTextSize(16);
             tvEmpty.setGravity(Gravity.CENTER);
             content.addView(tvEmpty, new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT));
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT));
             return;
         }
 
         rgMode = new RadioGroup(this);
         rgMode.setOrientation(RadioGroup.HORIZONTAL);
-        rbForward = new RadioButton(this); rbForward.setText("正算（K+B → XY）"); rbForward.setId(1); rbForward.setChecked(true); rgMode.addView(rbForward);
-        rbReverse = new RadioButton(this); rbReverse.setText("反算（XY → K+B）"); rbReverse.setId(2); rgMode.addView(rbReverse);
+        rbForward = new RadioButton(this);
+        rbForward.setText("正算（K+B → XY）");
+        rbForward.setId(1);
+        rbForward.setChecked(true);
+        rgMode.addView(rbForward);
+        rbReverse = new RadioButton(this);
+        rbReverse.setText("反算（XY → K+B）");
+        rbReverse.setId(2);
+        rgMode.addView(rbReverse);
         content.addView(rgMode);
 
-        boxForward = new LinearLayout(this); boxForward.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout rowK = new LinearLayout(this); rowK.setOrientation(LinearLayout.HORIZONTAL);
-        TextView tvK = new TextView(this); tvK.setText("桩号 K: "); tvK.setWidth(dp(110)); rowK.addView(tvK);
-        etK = new EditText(this); etK.setHint("米"); etK.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)); rowK.addView(etK);
+        boxForward = new LinearLayout(this);
+        boxForward.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout rowK = new LinearLayout(this);
+        rowK.setOrientation(LinearLayout.HORIZONTAL);
+        TextView tvK = new TextView(this);
+        tvK.setText("桩号 K: ");
+        tvK.setWidth(dp(110));
+        rowK.addView(tvK);
+        etK = new EditText(this);
+        etK.setHint("米");
+        etK.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        rowK.addView(etK);
         boxForward.addView(rowK);
 
-        LinearLayout rowB = new LinearLayout(this); rowB.setOrientation(LinearLayout.HORIZONTAL);
-        TextView tvB = new TextView(this); tvB.setText("偏距 B: "); tvB.setWidth(dp(110)); rowB.addView(tvB);
-        etB = new EditText(this); etB.setHint("米（左负右正）"); etB.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)); rowB.addView(etB);
+        LinearLayout rowB = new LinearLayout(this);
+        rowB.setOrientation(LinearLayout.HORIZONTAL);
+        TextView tvB = new TextView(this);
+        tvB.setText("偏距 B: ");
+        tvB.setWidth(dp(110));
+        rowB.addView(tvB);
+        etB = new EditText(this);
+        etB.setHint("米（左负右正）");
+        etB.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        rowB.addView(etB);
         boxForward.addView(rowB);
         content.addView(boxForward);
 
-        boxReverse = new LinearLayout(this); boxReverse.setOrientation(LinearLayout.VERTICAL); boxReverse.setVisibility(View.GONE);
-        LinearLayout rowX = new LinearLayout(this); rowX.setOrientation(LinearLayout.HORIZONTAL);
-        TextView tvX = new TextView(this); tvX.setText("X: "); tvX.setWidth(dp(110)); rowX.addView(tvX);
-        etX = new EditText(this); etX.setHint("X 坐标"); etX.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)); rowX.addView(etX);
+        boxReverse = new LinearLayout(this);
+        boxReverse.setOrientation(LinearLayout.VERTICAL);
+        boxReverse.setVisibility(View.GONE);
+        LinearLayout rowX = new LinearLayout(this);
+        rowX.setOrientation(LinearLayout.HORIZONTAL);
+        TextView tvX = new TextView(this);
+        tvX.setText("X: ");
+        tvX.setWidth(dp(110));
+        rowX.addView(tvX);
+        etX = new EditText(this);
+        etX.setHint("X 坐标");
+        etX.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        rowX.addView(etX);
         boxReverse.addView(rowX);
 
-        LinearLayout rowY = new LinearLayout(this); rowY.setOrientation(LinearLayout.HORIZONTAL);
-        TextView tvY = new TextView(this); tvY.setText("Y: "); tvY.setWidth(dp(110)); rowY.addView(tvY);
-        etY = new EditText(this); etY.setHint("Y 坐标"); etY.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)); rowY.addView(etY);
+        LinearLayout rowY = new LinearLayout(this);
+        rowY.setOrientation(LinearLayout.HORIZONTAL);
+        TextView tvY = new TextView(this);
+        tvY.setText("Y: ");
+        tvY.setWidth(dp(110));
+        rowY.addView(tvY);
+        etY = new EditText(this);
+        etY.setHint("Y 坐标");
+        etY.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        rowY.addView(etY);
         boxReverse.addView(rowY);
         content.addView(boxReverse);
 
-        Button btnCalc = new Button(this); btnCalc.setText("计算"); content.addView(btnCalc);
-        resultBox = new LinearLayout(this); resultBox.setOrientation(LinearLayout.VERTICAL); resultBox.setPadding(10, 10, 10, 10); content.addView(resultBox);
+        Button btnCalc = new Button(this);
+        btnCalc.setText("计算");
+        content.addView(btnCalc);
+        resultBox = new LinearLayout(this);
+        resultBox.setOrientation(LinearLayout.VERTICAL);
+        resultBox.setPadding(10, 10, 10, 10);
+        content.addView(resultBox);
 
         rgMode.setOnCheckedChangeListener(new RadioGroup.OnCheckedChangeListener() {
-            @Override public void onCheckedChanged(RadioGroup group, int checkedId) {
-                if (checkedId == 1) { boxForward.setVisibility(View.VISIBLE); boxReverse.setVisibility(View.GONE); }
-                else { boxForward.setVisibility(View.GONE); boxReverse.setVisibility(View.VISIBLE); }
+            @Override
+            public void onCheckedChanged(RadioGroup group, int checkedId) {
+                if (checkedId == 1) {
+                    boxForward.setVisibility(View.VISIBLE);
+                    boxReverse.setVisibility(View.GONE);
+                } else {
+                    boxForward.setVisibility(View.GONE);
+                    boxReverse.setVisibility(View.VISIBLE);
+                }
                 resultBox.removeAllViews();
             }
         });
 
         btnCalc.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                if (rbForward.isChecked()) doForward(); else doReverse();
+            @Override
+            public void onClick(View v) {
+                if (rbForward.isChecked()) doForward();
+                else doReverse();
             }
         });
     }
@@ -111,12 +168,14 @@ public class CalcActivity extends BaseNavActivity {
             k = Double.parseDouble(etK.getText().toString().trim());
             b = Double.parseDouble(etB.getText().toString().trim());
         } catch (Exception e) {
-            Toast.makeText(this, "输入格式错误", Toast.LENGTH_SHORT).show(); return;
+            Toast.makeText(this, "输入格式错误", Toast.LENGTH_SHORT).show();
+            return;
         }
 
-        double startK = app.data.pqx[0][0];
-        int lastIdx = app.data.pqx.length - 1;
-        double endK = app.data.pqx[lastIdx][0] + app.data.pqx[lastIdx][4];
+        // ===== 核心修改：使用 currentPqx =====
+        double startK = app.data.currentPqx[0][0];
+        int lastIdx = app.data.currentPqx.length - 1;
+        double endK = app.data.currentPqx[lastIdx][0] + app.data.currentPqx[lastIdx][4];
 
         if (k < startK || k > endK) {
             clearResult();
@@ -125,14 +184,16 @@ public class CalcActivity extends BaseNavActivity {
             return;
         }
 
-        double[] xy = LL.hua_Dantiaoxianludange(app.data.pqx, k, b, 90);
+        double[] xy = LL.hua_Dantiaoxianludange(app.data.currentPqx, k, b, 90);
         double h = LL.hua_H(app.data.sqx, k);
 
         clearResult();
         addResultLine("桩号: " + LL.hua_Num2K(k), null, 0xFF333333);
         addResultLine("偏距: " + String.format("%.3f", b) + " m", null, 0xFF333333);
-        addResultLine("X = " + String.format("%.3f", xy[0]), String.format("%.3f", xy[0]), 0xFF0078D4);
-        addResultLine("Y = " + String.format("%.3f", xy[1]), String.format("%.3f", xy[1]), 0xFF0078D4);
+        addResultLine("X = " + String.format("%.3f", xy[0]), String.format("%.3f", xy[
+        0]), 0xFF0078D4);
+        addResultLine("Y = " + String.format("%.3f", xy[1]), String.format("%.3f", xy[
+        1]), 0xFF0078D4);
         addResultLine("中桩高程 H = " + String.format("%.3f", h), String.format("%.3f", h), 0xFF0078D4);
         addResultLine("（点蓝色行可复制）", null, 0xFF999999);
     }
@@ -143,15 +204,23 @@ public class CalcActivity extends BaseNavActivity {
             x = Double.parseDouble(etX.getText().toString().trim());
             y = Double.parseDouble(etY.getText().toString().trim());
         } catch (Exception e) {
-            Toast.makeText(this, "输入格式错误", Toast.LENGTH_SHORT).show(); return;
+            Toast.makeText(this, "输入格式错误", Toast.LENGTH_SHORT).show();
+            return;
         }
 
-        double[] kb = LL.hua_Fs(app.data.pqx, x, y);
+        // ===== 核心修改：使用 currentPqx =====
+        double[] kb = LL.hua_Fs(app.data.currentPqx, x, y);
         double k = kb[0], b = kb[1];
         clearResult();
 
-        if (k == -1) { addResultLine("坐标超出线路起点范围", null, 0xFFDD0000); return; }
-        if (k == -2) { addResultLine("坐标超出线路终点范围", null, 0xFFDD0000); return; }
+        if (k == -1) {
+            addResultLine("坐标超出线路起点范围", null, 0xFFDD0000);
+            return;
+        }
+        if (k == -2) {
+            addResultLine("坐标超出线路终点范围", null, 0xFFDD0000);
+            return;
+        }
 
         double h = LL.hua_H(app.data.sqx, k);
         addResultLine("桩号 = " + LL.hua_Num2K(k), String.format("%.3f", k), 0xFF0078D4);
@@ -160,14 +229,39 @@ public class CalcActivity extends BaseNavActivity {
         addResultLine("（点蓝色行可复制）", null, 0xFF999999);
     }
 
+// ===== 新增：切换路线时自动重新计算 =====
+    @Override
+    protected void onRoadChanged() {
+        // 如果当前是正算模式，且输入框有内容，自动重算
+        if (rbForward.isChecked()) {
+            String kStr = etK.getText().toString().trim();
+            String bStr = etB.getText().toString().trim();
+            if (!kStr.isEmpty() && !bStr.isEmpty()) {
+                doForward();
+            }
+        }
+        // 如果当前是反算模式，且输入框有内容，自动重算
+        else if (rbReverse.isChecked()) {
+            String xStr = etX.getText().toString().trim();
+            String yStr = etY.getText().toString().trim();
+            if (!xStr.isEmpty() && !yStr.isEmpty()) {
+                doReverse();
+            }
+        }
+    }
+
     private void addResultLine(String display, final String copyValue, int color) {
         TextView tv = new TextView(this);
-        tv.setText(display); tv.setTextSize(16); tv.setTextColor(color); tv.setPadding(15, 12, 15, 12);
+        tv.setText(display);
+        tv.setTextSize(16);
+        tv.setTextColor(color);
+        tv.setPadding(15, 12, 15, 12);
         resultBox.addView(tv);
         if (copyValue != null) {
             tv.setBackgroundColor(0xFFF0F8FF);
             tv.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View v) {
+                @Override
+                public void onClick(View v) {
                     ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
                     cm.setPrimaryClip(ClipData.newPlainText("hdm", copyValue));
                     Toast.makeText(CalcActivity.this, "已复制: " + copyValue, Toast.LENGTH_SHORT).show();
@@ -175,5 +269,8 @@ public class CalcActivity extends BaseNavActivity {
             });
         }
     }
-    private void clearResult() { resultBox.removeAllViews(); }
+
+    private void clearResult() {
+        resultBox.removeAllViews();
+    }
 }

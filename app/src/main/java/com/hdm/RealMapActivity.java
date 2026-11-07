@@ -65,7 +65,7 @@ public class RealMapActivity extends BaseNavActivity {
     private List<MapRoadData> allRoadsList = new ArrayList<>();
     private int currentSelectedRoad = 0;
     private boolean isShowRoadNames = false;
-    private boolean isShowControlPoints = false; // 新增：是否显示控制点
+    private boolean isShowControlPoints = false; 
 
     private String currentMapSourceName = "";
     private String lastSelectedRoadName = "主线";
@@ -110,6 +110,37 @@ public class RealMapActivity extends BaseNavActivity {
         if (lm != null && listener == null) startGps();
     }
 
+    // ================= 新增：响应顶部全局路线切换 =================
+    @Override
+    protected void onRoadChanged() {
+        if (app.data == null || allRoadsList.isEmpty() || mapView == null) return;
+
+        int targetIndex = 0;
+        if (app.data.currentPqx == app.data.pqx) {
+            targetIndex = 0; // 主线
+        } else if (app.data.extraRoads != null) {
+            for (int i = 0; i < app.data.extraRoads.size(); i++) {
+                if (app.data.extraRoads.get(i).pqx == app.data.currentPqx) {
+                    targetIndex = i + 1; // 支线在列表中的索引从1开始
+                    break;
+                }
+            }
+        }
+
+        if (currentSelectedRoad != targetIndex) {
+            currentSelectedRoad = targetIndex;
+            lastSelectedRoadName = allRoadsList.get(targetIndex).name;
+            
+            // 保存偏好
+            String projName = (app != null && app.currentProjectName != null) ? app.currentProjectName : "default";
+            String spRoadKey = "last_road_name_" + projName;
+            getSharedPreferences("hdm_config", MODE_PRIVATE).edit().putString(spRoadKey, lastSelectedRoadName).apply();
+
+            // 通知地图引擎切换
+            mapView.switchRoad(targetIndex);
+        }
+    }
+
     private void setupRtk() {
         app.rtkManager.setCallback(new BluetoothRtkManager.RtkCallback() {
             @Override
@@ -142,39 +173,30 @@ public class RealMapActivity extends BaseNavActivity {
         });
     }
 
-    // ================= 核心修改：让地图蓝点跟随偏移量移动 =================
     private void updateMapLocation(double lat, double lon) {
         if (app.data == null || allRoadsList.isEmpty() || mapView == null) return;
 
         MapRoadData currentRoad = allRoadsList.get(currentSelectedRoad);
 
-        // 1. 原始经纬度 -> 工程 XY
         double[] xy = Projection.gps2Xy(lon, lat, app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
         if (xy == null || xy.length < 2) return;
 
-        // 2. 加上平移参数
         xy[0] += app.rtkOffsetX;
         xy[1] += app.rtkOffsetY;
 
-        // 3. 根据偏移后的 XY 算桩号和偏距
         double[] kb = LL.hua_Fs(currentRoad.pqx, xy[0], xy[1]);
         String stationStr = kb[0] < 0 ? "超出范围" : LL.hua_Num2K(kb[0]);
-        String offsetStr = kb[0] < 0 ? "--" : String.format("%.3f m (%s)", Math.abs(kb[1]), kb[
-                                1] < 0 ? "左" : "右");
+        String offsetStr = kb[0] < 0 ? "--" : String.format("%.3f m (%s)", Math.abs(kb[1]), kb[1] < 0 ? "左" : "右");
 
         if (app.hasRtkData && app.currentRtkFix > 0) {
             stationStr += " [RTK]";
         }
 
-        // 4. 关键一步：把偏移后的 XY 反算回经纬度，这样地图上的定位蓝点才会跟着平移
-        double[] newLonLat = Projection.xy2Gps(xy[0], xy[
-        1], app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
+        double[] newLonLat = Projection.xy2Gps(xy[0], xy[1], app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
 
         if (newLonLat != null && newLonLat.length >= 2) {
-            // 注意：xy2Gps 返回的是 {经度, 纬度}，而 updateGps 需要的是 (纬度, 经度)
             mapView.updateGps(newLonLat[1], newLonLat[0], stationStr, offsetStr);
         } else {
-            // 兜底：万一反算失败，还是用原坐标画图
             mapView.updateGps(lat, lon, stationStr, offsetStr);
         }
     }
@@ -187,53 +209,50 @@ public class RealMapActivity extends BaseNavActivity {
     }
 
     private List<MapSource> loadMapSources() {
-    List<MapSource> sources = new ArrayList<>();
-    File sd = Environment.getExternalStorageDirectory();
-    File dir = new File(sd, "1hdm");
-    if (!dir.exists()) dir.mkdirs();
+        List<MapSource> sources = new ArrayList<>();
+        File sd = Environment.getExternalStorageDirectory();
+        File dir = new File(sd, "1hdm");
+        if (!dir.exists()) dir.mkdirs();
 
-    File file = new File(dir, "maps.txt");
-    if (!file.exists()) {
-        String defaultTxt = "谷歌路网,https://mt1.google.com/vt/lyrs=r&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}\n" +
-                "谷歌卫星,https://mt1.google.com/vt/lyrs=y&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}\n" +
-                "地形图,https://a.tile.opentopomap.org/{z}/{x}/{y}.png\n" +
-                "OSM,https://tile.openstreetmap.org/{z}/{x}/{y}.png\n";
-        try {
-            FileOutputStream fos = new FileOutputStream(file);
-            fos.write(defaultTxt.getBytes("UTF-8"));
-            fos.close();
-        } catch (Exception e) {
-        }
-    }
-
-    try {
-        FileInputStream fis = new FileInputStream(file);
-        BufferedReader br = new BufferedReader(new InputStreamReader(fis, "UTF-8"));
-        String line;
-        while ((line = br.readLine()) != null) {
-            line = line.trim();
-            if (line.isEmpty() || line.startsWith("#")) continue;
-            String[] parts = line.split(",");
-            if (parts.length >= 2) {
-                sources.add(new MapSource(parts[0].trim(), parts[1].trim()));
+        File file = new File(dir, "maps.txt");
+        if (!file.exists()) {
+            String defaultTxt = "谷歌路网,https://mt1.google.com/vt/lyrs=r&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}\n" +
+                    "谷歌卫星,https://mt1.google.com/vt/lyrs=y&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}\n" +
+                    "地形图,https://a.tile.opentopomap.org/{z}/{x}/{y}.png\n" +
+                    "OSM,https://tile.openstreetmap.org/{z}/{x}/{y}.png\n";
+            try {
+                FileOutputStream fos = new FileOutputStream(file);
+                fos.write(defaultTxt.getBytes("UTF-8"));
+                fos.close();
+            } catch (Exception e) {
             }
         }
-        br.close();
-    } catch (Exception e) {
+
+        try {
+            FileInputStream fis = new FileInputStream(file);
+            BufferedReader br = new BufferedReader(new InputStreamReader(fis, "UTF-8"));
+            String line;
+            while ((line = br.readLine()) != null) {
+                line = line.trim();
+                if (line.isEmpty() || line.startsWith("#")) continue;
+                String[] parts = line.split(",");
+                if (parts.length >= 2) {
+                    sources.add(new MapSource(parts[0].trim(), parts[1].trim()));
+                }
+            }
+            br.close();
+        } catch (Exception e) {
+        }
+
+        if (sources.isEmpty()) {
+            sources.add(new MapSource("谷歌路网", "https://mt1.google.com/vt/lyrs=r&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}"));
+        }
+
+        sources.add(0, new MapSource("纯白色", "blank://white"));
+        sources.add(0, new MapSource("纯深色", "blank://dark"));
+
+        return sources;
     }
-
-    if (sources.isEmpty()) {
-        sources.add(new MapSource("谷歌路网", "https://mt1.google.com/vt/lyrs=r&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}"));
-    }
-
-    // ================= 新增：插入空白图层选项 =================
-    // 每次加载地图时，把这两个选项放在列表最前面
-    sources.add(0, new MapSource("白色底图)", "blank://white"));
-    sources.add(0, new MapSource("深色底图)", "blank://dark"));
-    // ==========================================================
-
-    return sources;
-}
 
     private void initUI() {
         content.removeAllViews();
@@ -399,11 +418,10 @@ public class RealMapActivity extends BaseNavActivity {
 
         if (app.data != null) {
             loadAllRoutes();
-            updateControlPoints(); // 初始化控制点状态
+            updateControlPoints(); 
         }
     }
 
-    // ================= 新增：读取并绘制控制点 =================
     private void updateControlPoints() {
         if (!isShowControlPoints) {
             mapView.setControlPoints(null);
@@ -429,10 +447,8 @@ public class RealMapActivity extends BaseNavActivity {
                     double x = Double.parseDouble(parts[1].trim());
                     double y = Double.parseDouble(parts[2].trim());
 
-                    // 使用 Projection.xy2Gps 逆变换，把 X,Y 转成经纬度
                     double[] lb = Projection.xy2Gps(x, y, app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
                     if (lb != null && lb.length >= 2) {
-                        // {lat, lng, name}
                         ctrlList.add(new Object[]{lb[1], lb[0], name});
                     }
                 }
@@ -513,7 +529,6 @@ public class RealMapActivity extends BaseNavActivity {
         line0.setBackgroundColor(0xFFEEEEEE);
         layout.addView(line0, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
 
-        // ================= 新增：显示控制点开关 =================
         LinearLayout rowCtrl = new LinearLayout(this);
         rowCtrl.setOrientation(LinearLayout.HORIZONTAL);
         rowCtrl.setGravity(Gravity.CENTER_VERTICAL);
@@ -539,7 +554,6 @@ public class RealMapActivity extends BaseNavActivity {
         });
         rowCtrl.addView(btnCtrlSwitch);
         layout.addView(rowCtrl);
-        // =========================================================
 
         View line0_2 = new View(this);
         line0_2.setBackgroundColor(0xFFEEEEEE);
@@ -636,57 +650,7 @@ public class RealMapActivity extends BaseNavActivity {
         line2.setBackgroundColor(0xFFEEEEEE);
         layout.addView(line2, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
 
-        TextView tvRouteTitle = new TextView(this);
-        tvRouteTitle.setText("当前路线");
-        tvRouteTitle.setTextSize(16);
-        tvRouteTitle.setTextColor(0xFF333333);
-        tvRouteTitle.setTypeface(null, android.graphics.Typeface.BOLD);
-        tvRouteTitle.setPadding(0, dp(16), 0, dp(12));
-        layout.addView(tvRouteTitle);
-
-        if (allRoadsList.isEmpty()) {
-            TextView tvNoRoute = new TextView(this);
-            tvNoRoute.setText("未加载路线数据");
-            tvNoRoute.setTextColor(0xFF999999);
-            tvNoRoute.setPadding(0, dp(12), 0, dp(12));
-            layout.addView(tvNoRoute);
-        } else {
-            for (int i = 0; i < allRoadsList.size(); i++) {
-                final int index = i;
-                String roadName = allRoadsList.get(i).name;
-                boolean isSelected = (currentSelectedRoad == i);
-
-                TextView btnRoute = new TextView(this);
-                btnRoute.setText(roadName);
-                btnRoute.setTextSize(16);
-                btnRoute.setTextColor(isSelected ? 0xFF0078D4 : 0xFF333333);
-                btnRoute.setPadding(dp(12), dp(12), dp(12), dp(12));
-                if (isSelected) btnRoute.setBackground(makeRoundRectBg(0x1A0078D4, 8));
-
-                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-                lp.topMargin = dp(4);
-                btnRoute.setLayoutParams(lp);
-
-                btnRoute.setOnClickListener(v -> {
-                    currentSelectedRoad = index;
-                    lastSelectedRoadName = roadName;
-
-                    String projName = (app != null && app.currentProjectName != null) ? app.currentProjectName : "default";
-                    String spRoadKey = "last_road_name_" + projName;
-                    getSharedPreferences("hdm_config", MODE_PRIVATE).edit().putString(spRoadKey, lastSelectedRoadName).apply();
-
-                    if (mapView != null) mapView.switchRoad(index);
-                    if (settingsDialog != null) settingsDialog.dismiss();
-                });
-                layout.addView(btnRoute);
-            }
-        }
-
-        // 3D 地球入口
-        View line3 = new View(this);
-        line3.setBackgroundColor(0xFFEEEEEE);
-        layout.addView(line3, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
-
+        // 去掉选择路线列表后，直接放 3D 入口
         TextView btn3D = new TextView(this);
         btn3D.setText("查看当前 3D 地球 (WebGL) >");
         btn3D.setTextSize(16);
@@ -741,9 +705,7 @@ public class RealMapActivity extends BaseNavActivity {
         row1.addView(etCurY);
         layout.addView(row1);
 
-        // ================= 核心：连续采样 10 次求平均 =================
-        final boolean[] isSampling = {false}; // 防止连点开启多个线程
-
+        final boolean[] isSampling = {false};
         TextView btnRead = new TextView(this);
         btnRead.setText("↺ 读取当前坐标 (平滑采样 10 次)");
         btnRead.setTextColor(0xFF0078D4);
@@ -769,14 +731,12 @@ public class RealMapActivity extends BaseNavActivity {
                 int validSamples = 0;
 
                 for (int i = 0; i < sampleCount; i++) {
-                    // 动态更新按钮进度提示
                     final int currentProgress = i + 1;
                     runOnUiThread(() -> btnRead.setText("⏳ 采样中 " + currentProgress + " / 10 ..."));
 
                     double readLat = 0;
                     double readLon = 0;
 
-                    // 核心修复：必须处于 RTK 固定解/浮点解且已连接，才读 RTK。否则强行读手机 GPS。
                     if (app.rtkConnected && app.hasRtkData && app.currentRtkFix > 0) {
                         readLat = app.currentRtkLat;
                         readLon = app.currentRtkLon;
@@ -807,12 +767,10 @@ public class RealMapActivity extends BaseNavActivity {
                         }
                     }
 
-                    // ================= 修改这里：把 200 改成 1000 =================
                     try {
                         Thread.sleep(1000);
                     } catch (Exception ignored) {
                     }
-                    // ==============================================================
                 }
 
                 final int finalValidSamples = validSamples;
@@ -835,7 +793,6 @@ public class RealMapActivity extends BaseNavActivity {
             }).start();
         });
         layout.addView(btnRead);
-// ================================================================
 
         LinearLayout row2 = new LinearLayout(this);
         row2.setOrientation(LinearLayout.HORIZONTAL);
@@ -1008,7 +965,7 @@ public class RealMapActivity extends BaseNavActivity {
                         Toast.makeText(this, "校正成功！偏移已保存", Toast.LENGTH_SHORT).show();
 
                         if (app.hasRtkData) updateMapLocation(app.currentRtkLat, app.currentRtkLon);
-                        if (isShowControlPoints) updateControlPoints(); // 校正后刷新控制点位置
+                        if (isShowControlPoints) updateControlPoints(); 
 
                         if (settingsDialog != null) settingsDialog.dismiss();
 

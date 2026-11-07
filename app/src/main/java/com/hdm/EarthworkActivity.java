@@ -42,6 +42,14 @@ public class EarthworkActivity extends BaseNavActivity {
         initUI();
     }
 
+    @Override
+    protected void onRoadChanged() {
+        // 切换路线后自动重新计算
+        if (etStation != null && !etStation.getText().toString().isEmpty()) {
+            performCalculate();
+        }
+    }
+
     private void initUI() {
         content.removeAllViews();
 
@@ -108,31 +116,39 @@ public class EarthworkActivity extends BaseNavActivity {
         btnCalc.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                String input = etStation.getText().toString().trim();
-                double station;
-                try {
-                    station = Double.parseDouble(input);
-                } catch (Exception e) {
-                    Toast.makeText(EarthworkActivity.this, "桩号格式错误", Toast.LENGTH_SHORT).show();
-                    return;
-                }
-
-                ComputeResult r;
-                try {
-                    r = app.data.Query(station);
-                } catch (Exception e) {
-                    Toast.makeText(EarthworkActivity.this, "计算异常: " + e.getMessage(), Toast.LENGTH_LONG).show();
-                    return;
-                }
-
-                if (!r.success) {
-                    Toast.makeText(EarthworkActivity.this, "失败: " + r.errorMessage, Toast.LENGTH_LONG).show();
-                    sectionView.setData(null);
-                    return;
-                }
-
-                sectionView.setData(r.result);
+                performCalculate();
             }
         });
+    }
+
+    // 抽离出来的核心计算方法
+    private void performCalculate() {
+        if (app.data == null || app.data.currentCalculator == null) return;
+        
+        String input = etStation.getText().toString().trim();
+        double station;
+        try {
+            station = Double.parseDouble(input);
+        } catch (Exception e) {
+            Toast.makeText(this, "桩号格式错误", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        ComputeResult r;
+        try {
+            // 换成动态的 currentCalculator
+            r = app.data.currentCalculator.Compute(station);
+        } catch (Exception e) {
+            Toast.makeText(this, "计算异常: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        if (!r.success) {
+            Toast.makeText(this, "失败: " + r.errorMessage, Toast.LENGTH_LONG).show();
+            sectionView.setData(null);
+            return;
+        }
+
+        sectionView.setData(r.result);
     }
 }
