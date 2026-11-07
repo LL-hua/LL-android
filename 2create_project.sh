@@ -3,12 +3,30 @@
 PROJ_NAME=${1:-"MyApp"}
 PKG="com.example.myapp"
 
+# ================= 1. 自动检测并生成签名文件 =================
+KEYSTORE_PATH="$HOME/android-release.keystore"
+if [ ! -f "$KEYSTORE_PATH" ]; then
+    echo "🔑 未找到签名文件，正在自动生成..."
+    keytool -genkey -v -keystore "$KEYSTORE_PATH" -alias android -keyalg RSA -keysize 2048 -validity 10000 -storepass 123456 -keypass 123456 -dname "CN=Android,O=Android,C=US" > /dev/null 2>&1
+    echo "✅ 签名文件已生成：$KEYSTORE_PATH"
+else
+    echo "✅ 签名文件已存在，跳过生成。"
+fi
+
+echo "🚀 开始创建项目: $PROJ_NAME ..."
+
+# 如果目录已存在，提示并退出
+if [ -d "$PROJ_NAME" ]; then
+    echo "⚠️ 目录 $PROJ_NAME 已存在！请换个名字或手动删除。"
+    return 1 2>/dev/null || exit 1
+fi
+
 mkdir -p $PROJ_NAME
 cd $PROJ_NAME
 mkdir -p app/src/main/java/${PKG//./\/}
 mkdir -p app/src/main/res/values
 
-# 根 build.gradle (已改为海外最快源)
+# 2. 根 build.gradle
 cat > build.gradle << 'EOF'
 buildscript {
     repositories {
@@ -16,7 +34,7 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:8.1.0'
+        classpath 'com.android.tools.build:gradle:8.2.0'
     }
 }
 allprojects {
@@ -29,13 +47,17 @@ EOF
 
 echo "include ':app'" > settings.gradle
 
-# app/build.gradle
+# 3. app/build.gradle (已包含签名配置)
 cat > app/build.gradle << 'EOF'
 apply plugin: 'com.android.application'
 
 android {
     namespace 'com.example.myapp'
     compileSdk 34
+    
+    lint {
+        checkReleaseBuilds false
+    }
 
     defaultConfig {
         applicationId "com.example.myapp"
@@ -65,10 +87,9 @@ android {
 }
 EOF
 
-# proguard
+# 4. 其它基础文件
 echo "-keep public class * extends android.app.Activity" > app/proguard-rules.pro
 
-# AndroidManifest.xml
 cat > app/src/main/AndroidManifest.xml << 'EOF'
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -83,7 +104,6 @@ cat > app/src/main/AndroidManifest.xml << 'EOF'
 </manifest>
 EOF
 
-# MainActivity.java
 cat > app/src/main/java/${PKG//./\/}/MainActivity.java << 'EOF'
 package com.example.myapp;
 
@@ -103,7 +123,7 @@ public class MainActivity extends Activity {
 }
 EOF
 
-# 打包脚本
+# 5. 打包脚本
 cat > build.sh << 'EOF'
 #!/bin/bash
 echo "🚀 开始编译..."
@@ -119,5 +139,9 @@ EOF
 
 chmod +x build.sh
 
-echo "✅ 项目 $PROJ_NAME 已创建！"
-echo "👉 运行: cd $PROJ_NAME && ./build.sh"
+echo "=========================================="
+echo "✅ 项目 $PROJ_NAME 创建完毕！"
+echo "👉 接下来可以直接运行: ./build.sh"
+echo "=========================================="
+
+# 注意：不要在这里写 cd $PROJ_NAME
