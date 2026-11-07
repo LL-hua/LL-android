@@ -65,7 +65,7 @@ public class RealMapActivity extends BaseNavActivity {
     private List<MapRoadData> allRoadsList = new ArrayList<>();
     private int currentSelectedRoad = 0;
     private boolean isShowRoadNames = false;
-    private boolean isShowControlPoints = false; 
+    private boolean isShowControlPoints = false;
 
     private String currentMapSourceName = "";
     private String lastSelectedRoadName = "主线";
@@ -110,18 +110,17 @@ public class RealMapActivity extends BaseNavActivity {
         if (lm != null && listener == null) startGps();
     }
 
-    // ================= 新增：响应顶部全局路线切换 =================
     @Override
     protected void onRoadChanged() {
         if (app.data == null || allRoadsList.isEmpty() || mapView == null) return;
 
         int targetIndex = 0;
         if (app.data.currentPqx == app.data.pqx) {
-            targetIndex = 0; // 主线
+            targetIndex = 0;
         } else if (app.data.extraRoads != null) {
             for (int i = 0; i < app.data.extraRoads.size(); i++) {
                 if (app.data.extraRoads.get(i).pqx == app.data.currentPqx) {
-                    targetIndex = i + 1; // 支线在列表中的索引从1开始
+                    targetIndex = i + 1;
                     break;
                 }
             }
@@ -130,13 +129,11 @@ public class RealMapActivity extends BaseNavActivity {
         if (currentSelectedRoad != targetIndex) {
             currentSelectedRoad = targetIndex;
             lastSelectedRoadName = allRoadsList.get(targetIndex).name;
-            
-            // 保存偏好
+
             String projName = (app != null && app.currentProjectName != null) ? app.currentProjectName : "default";
             String spRoadKey = "last_road_name_" + projName;
             getSharedPreferences("hdm_config", MODE_PRIVATE).edit().putString(spRoadKey, lastSelectedRoadName).apply();
 
-            // 通知地图引擎切换
             mapView.switchRoad(targetIndex);
         }
     }
@@ -186,13 +183,15 @@ public class RealMapActivity extends BaseNavActivity {
 
         double[] kb = LL.hua_Fs(currentRoad.pqx, xy[0], xy[1]);
         String stationStr = kb[0] < 0 ? "超出范围" : LL.hua_Num2K(kb[0]);
-        String offsetStr = kb[0] < 0 ? "--" : String.format("%.3f m (%s)", Math.abs(kb[1]), kb[1] < 0 ? "左" : "右");
+        String offsetStr = kb[0] < 0 ? "--" : String.format("%.3f m (%s)", Math.abs(kb[1]), kb[
+                                1] < 0 ? "左" : "右");
 
         if (app.hasRtkData && app.currentRtkFix > 0) {
             stationStr += " [RTK]";
         }
 
-        double[] newLonLat = Projection.xy2Gps(xy[0], xy[1], app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
+        double[] newLonLat = Projection.xy2Gps(xy[0], xy[
+        1], app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
 
         if (newLonLat != null && newLonLat.length >= 2) {
             mapView.updateGps(newLonLat[1], newLonLat[0], stationStr, offsetStr);
@@ -248,8 +247,8 @@ public class RealMapActivity extends BaseNavActivity {
             sources.add(new MapSource("谷歌路网", "https://mt1.google.com/vt/lyrs=r&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}"));
         }
 
-        sources.add(0, new MapSource("纯白色", "blank://white"));
-        sources.add(0, new MapSource("纯深色", "blank://dark"));
+        sources.add(0, new MapSource("图纸白 (无底图)", "blank://white"));
+        sources.add(0, new MapSource("CAD深色 (无底图)", "blank://dark"));
 
         return sources;
     }
@@ -418,7 +417,7 @@ public class RealMapActivity extends BaseNavActivity {
 
         if (app.data != null) {
             loadAllRoutes();
-            updateControlPoints(); 
+            updateControlPoints();
         }
     }
 
@@ -509,6 +508,7 @@ public class RealMapActivity extends BaseNavActivity {
         title.setTextColor(0xFF333333);
         layout.addView(title);
 
+        // ================= 1. RTK 连接 =================
         TextView btnRtk = new TextView(this);
         btnRtk.setText("连接蓝牙 RTK (当前: " + rtkStatus + ")");
         btnRtk.setTextSize(16);
@@ -517,6 +517,7 @@ public class RealMapActivity extends BaseNavActivity {
         btnRtk.setOnClickListener(v -> checkAndRequestBluetooth());
         layout.addView(btnRtk);
 
+        // ================= 2. RTK 点校正 =================
         TextView btnCorrection = new TextView(this);
         btnCorrection.setText("RTK 点校正 (当前偏移: X=" + String.format("%.3f", app.rtkOffsetX) + ", Y=" + String.format("%.3f", app.rtkOffsetY) + ")");
         btnCorrection.setTextSize(16);
@@ -529,6 +530,7 @@ public class RealMapActivity extends BaseNavActivity {
         line0.setBackgroundColor(0xFFEEEEEE);
         layout.addView(line0, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
 
+        // ================= 3. 显示控制点开关 =================
         LinearLayout rowCtrl = new LinearLayout(this);
         rowCtrl.setOrientation(LinearLayout.HORIZONTAL);
         rowCtrl.setGravity(Gravity.CENTER_VERTICAL);
@@ -559,6 +561,7 @@ public class RealMapActivity extends BaseNavActivity {
         line0_2.setBackgroundColor(0xFFEEEEEE);
         layout.addView(line0_2, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
 
+        // ================= 4. 显示道路名称开关 =================
         LinearLayout rowName = new LinearLayout(this);
         rowName.setOrientation(LinearLayout.HORIZONTAL);
         rowName.setGravity(Gravity.CENTER_VERTICAL);
@@ -591,6 +594,7 @@ public class RealMapActivity extends BaseNavActivity {
         lpLine.bottomMargin = dp(16);
         layout.addView(line1, lpLine);
 
+        // ================= 5. 图源切换 =================
         TextView tvMapTypeTitle = new TextView(this);
         tvMapTypeTitle.setText("地图图源 (可修改 1hdm/maps.txt 扩充)");
         tvMapTypeTitle.setTextSize(16);
@@ -650,7 +654,102 @@ public class RealMapActivity extends BaseNavActivity {
         line2.setBackgroundColor(0xFFEEEEEE);
         layout.addView(line2, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
 
-        // 去掉选择路线列表后，直接放 3D 入口
+        // ================= 6. DWG 加载与控制面板 =================
+        View lineDwg = new View(this);
+        lineDwg.setBackgroundColor(0xFFEEEEEE);
+        layout.addView(lineDwg, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
+
+        TextView btnLoadDwg = new TextView(this);
+        if (mapView.hasCadData()) {
+            btnLoadDwg.setText("卸载/清除 DWG 图纸");
+            btnLoadDwg.setTextColor(0xFFD32F2F);
+        } else {
+            btnLoadDwg.setText("加载 1hdm 目录下的 DWG 图纸 >");
+            btnLoadDwg.setTextColor(0xFF0078D4);
+        }
+        btnLoadDwg.setTextSize(16);
+        btnLoadDwg.setPadding(0, dp(24), 0, dp(8));
+        btnLoadDwg.setOnClickListener(v -> {
+            if (mapView.hasCadData()) {
+                mapView.clearCad();
+                if (settingsDialog != null) settingsDialog.dismiss();
+                Toast.makeText(this, "图纸已卸载", Toast.LENGTH_SHORT).show();
+            } else {
+                showDwgSelectionDialog();
+            }
+        });
+        layout.addView(btnLoadDwg);
+
+        // 只有在加载了 CAD 的情况下，才显示开关面板
+        if (mapView.hasCadData()) {
+            LinearLayout cadControlRow = new LinearLayout(this);
+            cadControlRow.setOrientation(LinearLayout.HORIZONTAL);
+            cadControlRow.setPadding(0, dp(8), 0, dp(16));
+
+            // 按钮：直线
+            TextView btnCadLine = new TextView(this);
+            btnCadLine.setText("直线");
+            btnCadLine.setTextSize(13);
+            btnCadLine.setPadding(dp(12), dp(6), dp(12), dp(6));
+            btnCadLine.setTextColor(mapView.isShowCadLine() ? Color.WHITE : 0xFF555555);
+            btnCadLine.setBackground(makeRoundRectBg(mapView.isShowCadLine() ? 0xFF0078D4 : 0xFFE0E0E0, 16));
+            btnCadLine.setOnClickListener(v -> {
+                mapView.setCadVisibility(!mapView.isShowCadLine(), mapView.isShowCadPolyline(), mapView.isShowCadCircle(), mapView.isShowCadText());
+                btnCadLine.setTextColor(mapView.isShowCadLine() ? Color.WHITE : 0xFF555555);
+                btnCadLine.setBackground(makeRoundRectBg(mapView.isShowCadLine() ? 0xFF0078D4 : 0xFFE0E0E0, 16));
+            });
+            cadControlRow.addView(btnCadLine);
+
+            // 按钮：多段线
+            TextView btnCadPoly = new TextView(this);
+            btnCadPoly.setText("多段线");
+            btnCadPoly.setTextSize(13);
+            btnCadPoly.setPadding(dp(12), dp(6), dp(12), dp(6));
+            btnCadPoly.setTextColor(mapView.isShowCadPolyline() ? Color.WHITE : 0xFF555555);
+            btnCadPoly.setBackground(makeRoundRectBg(mapView.isShowCadPolyline() ? 0xFF0078D4 : 0xFFE0E0E0, 16));
+            btnCadPoly.setOnClickListener(v -> {
+                mapView.setCadVisibility(mapView.isShowCadLine(), !mapView.isShowCadPolyline(), mapView.isShowCadCircle(), mapView.isShowCadText());
+                btnCadPoly.setTextColor(mapView.isShowCadPolyline() ? Color.WHITE : 0xFF555555);
+                btnCadPoly.setBackground(makeRoundRectBg(mapView.isShowCadPolyline() ? 0xFF0078D4 : 0xFFE0E0E0, 16));
+            });
+            cadControlRow.addView(btnCadPoly);
+
+            // 按钮：圆/弧
+            TextView btnCadCircle = new TextView(this);
+            btnCadCircle.setText("圆/弧");
+            btnCadCircle.setTextSize(13);
+            btnCadCircle.setPadding(dp(12), dp(6), dp(12), dp(6));
+            btnCadCircle.setTextColor(mapView.isShowCadCircle() ? Color.WHITE : 0xFF555555);
+            btnCadCircle.setBackground(makeRoundRectBg(mapView.isShowCadCircle() ? 0xFF0078D4 : 0xFFE0E0E0, 16));
+            btnCadCircle.setOnClickListener(v -> {
+                mapView.setCadVisibility(mapView.isShowCadLine(), mapView.isShowCadPolyline(), !mapView.isShowCadCircle(), mapView.isShowCadText());
+                btnCadCircle.setTextColor(mapView.isShowCadCircle() ? Color.WHITE : 0xFF555555);
+                btnCadCircle.setBackground(makeRoundRectBg(mapView.isShowCadCircle() ? 0xFF0078D4 : 0xFFE0E0E0, 16));
+            });
+            cadControlRow.addView(btnCadCircle);
+
+            // 按钮：文字
+            TextView btnCadText = new TextView(this);
+            btnCadText.setText("文字");
+            btnCadText.setTextSize(13);
+            btnCadText.setPadding(dp(12), dp(6), dp(12), dp(6));
+            btnCadText.setTextColor(mapView.isShowCadText() ? Color.WHITE : 0xFF555555);
+            btnCadText.setBackground(makeRoundRectBg(mapView.isShowCadText() ? 0xFF0078D4 : 0xFFE0E0E0, 16));
+            btnCadText.setOnClickListener(v -> {
+                mapView.setCadVisibility(mapView.isShowCadLine(), mapView.isShowCadPolyline(), mapView.isShowCadCircle(), !mapView.isShowCadText());
+                btnCadText.setTextColor(mapView.isShowCadText() ? Color.WHITE : 0xFF555555);
+                btnCadText.setBackground(makeRoundRectBg(mapView.isShowCadText() ? 0xFF0078D4 : 0xFFE0E0E0, 16));
+            });
+            cadControlRow.addView(btnCadText);
+
+            layout.addView(cadControlRow);
+        }
+
+        // ================= 7. 3D 地球入口 =================
+        View line3 = new View(this);
+        line3.setBackgroundColor(0xFFEEEEEE);
+        layout.addView(line3, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
+
         TextView btn3D = new TextView(this);
         btn3D.setText("查看当前 3D 地球 (WebGL) >");
         btn3D.setTextSize(16);
@@ -674,7 +773,6 @@ public class RealMapActivity extends BaseNavActivity {
         settingsDialog.show();
     }
 
-    // ================= RTK 点校正对话框 =================
     private void showCorrectionDialog() {
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
@@ -965,7 +1063,7 @@ public class RealMapActivity extends BaseNavActivity {
                         Toast.makeText(this, "校正成功！偏移已保存", Toast.LENGTH_SHORT).show();
 
                         if (app.hasRtkData) updateMapLocation(app.currentRtkLat, app.currentRtkLon);
-                        if (isShowControlPoints) updateControlPoints(); 
+                        if (isShowControlPoints) updateControlPoints();
 
                         if (settingsDialog != null) settingsDialog.dismiss();
 
@@ -1215,4 +1313,65 @@ public class RealMapActivity extends BaseNavActivity {
         super.onPause();
         if (sensorManager != null) sensorManager.unregisterListener(sensorListener);
     }
+    // ================= 弹出 DWG 文件选择框 =================
+private void showDwgSelectionDialog() {
+    File sd = Environment.getExternalStorageDirectory();
+    File dir = new File(sd, "1hdm");
+    if (!dir.exists()) dir.mkdirs();
+
+    File[] files = dir.listFiles();
+    final List<File> dwgFiles = new ArrayList<>();
+    final List<String> dwgNames = new ArrayList<>();
+
+    if (files != null) {
+        for (File f : files) {
+            if (f.isFile() && f.getName().toLowerCase().endsWith(".dwg")) {
+                dwgFiles.add(f);
+                dwgNames.add(f.getName());
+            }
+        }
+    }
+
+    if (dwgFiles.isEmpty()) {
+        Toast.makeText(this, "1hdm 目录下没有找到 .dwg 文件", Toast.LENGTH_LONG).show();
+        return;
+    }
+
+    final String[] items = dwgNames.toArray(new String[0]);
+    new AlertDialog.Builder(this)
+            .setTitle("选择 DWG 图纸")
+            .setItems(items, (dialog, which) -> loadDwgFile(dwgFiles.get(which)))
+            .show();
+}
+
+// ================= 解析并加载 DWG =================
+private void loadDwgFile(File dwgFile) {
+    Toast.makeText(this, "正在解析图纸，请稍候...", Toast.LENGTH_SHORT).show();
+
+    new Thread(() -> {
+        try {
+            FileInputStream fis = new FileInputStream(dwgFile);
+            byte[] data = new byte[(int) dwgFile.length()];
+            int read = fis.read(data);
+            fis.close();
+            if (read <= 0) return;
+
+            com.hdm.cad.drawing.Document doc = com.hdm.cad.drawing.DwgParser.parse(data);
+            
+            runOnUiThread(() -> {
+                if (doc != null && doc.modelSpace != null) {
+                    // 把解析结果丢给画布，画布内部会自动完成 xy2Gps 的映射
+                    mapView.setCadEntities(doc.modelSpace);
+                    Toast.makeText(this, "图纸已贴合地图！图元数: " + doc.modelSpace.size(), Toast.LENGTH_LONG).show();
+                    if (settingsDialog != null) settingsDialog.dismiss();
+                } else {
+                    Toast.makeText(this, "解析成功，但未发现图元", Toast.LENGTH_SHORT).show();
+                }
+            });
+        } catch (Exception e) {
+            e.printStackTrace();
+            runOnUiThread(() -> Toast.makeText(this, "解析失败: " + e.getMessage(), Toast.LENGTH_LONG).show());
+        }
+    }).start();
+}
 }
