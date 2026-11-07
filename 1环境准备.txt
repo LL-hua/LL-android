@@ -1,0 +1,34 @@
+# 1. 更新并安装基础包
+pkg update && pkg upgrade -y
+pkg install openjdk-21 git wget unzip zip nano -y
+
+# 2. 下载并配置 Android SDK
+mkdir -p $HOME/android-sdk/cmdline-tools
+cd $HOME/android-sdk/cmdline-tools
+wget https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+unzip commandlinetools-linux-11076708_latest.zip
+mv cmdline-tools latest
+
+# 3. 配置环境变量（写入 bashrc，永久生效）
+echo 'export ANDROID_HOME=$HOME/android-sdk' >> ~/.bashrc
+echo 'export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools' >> ~/.bashrc
+source ~/.bashrc
+
+# 4. 接受许可并安装基础平台（一路输入 y）
+yes | sdkmanager --licenses
+sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
+# 5. 下载 Gradle 8.5
+cd $HOME
+wget https://services.gradle.org/distributions/gradle-8.5-bin.zip
+unzip gradle-8.5-bin.zip
+mv gradle-8.5 gradle
+echo 'export PATH=$PATH:$HOME/gradle/bin' >> ~/.bashrc
+source ~/.bashrc
+
+# 6. 生成签名文件（密码自己记好，这里用 123456）
+keytool -genkey -v -keystore $HOME/android-release.keystore -alias android -keyalg RSA -keysize 2048 -validity 10000 -storepass 123456 -keypass 123456 -dname "CN=Android,O=Android,C=US"
+
+# 7. Termux 专属避坑：修复 AAPT2 冲突
+mkdir -p ~/.gradle
+echo "android.aapt2FromMavenOverride=/data/data/com.termux/files/usr/bin/aapt2" >> ~/.gradle/gradle.properties
