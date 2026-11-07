@@ -19,6 +19,9 @@ public class MapSource {
             this.dbName = "hdm_topo.mbtiles";
         } else if ("OSM".equals(name)) {
             this.dbName = "hdm_osm.mbtiles";
+        } else if (urlTemplate.startsWith("blank://")) {
+            // 空白图层不需要数据库
+            this.dbName = "blank"; 
         } else {
             // 用户自己加的新图源，直接用 "hdm_名称.mbtiles" 作为缓存文件
             this.dbName = "hdm_" + name + ".mbtiles";

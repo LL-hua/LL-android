@@ -371,7 +371,16 @@ public class CanvasMapView extends View {
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
-        canvas.drawColor(Color.LTGRAY);
+        
+        // 判断当前是不是空白图层，并设置背景色
+        String url = mapSources.get(currentMapIndex).urlTemplate;
+        if ("blank://dark".equals(url)) {
+            canvas.drawColor(0xFF2B2D30); // CAD 深空灰
+        } else if ("blank://white".equals(url)) {
+            canvas.drawColor(0xFFF8F9FA); // 工程图纸白
+        } else {
+            canvas.drawColor(Color.LTGRAY); // 默认底色
+        }
 
         int width = getWidth();
         int height = getHeight();
@@ -438,8 +447,7 @@ public class CanvasMapView extends View {
                     int mi = screenPts.size() / 2;
                     float[] mid = screenPts.get(mi);
                     float angle = calcRoadAngle(screenPts, mi);
-                    roadLabels.add(new Object[]{Integer.valueOf(r), Float.valueOf(mid[
-                            0]), Float.valueOf(mid[1]), Float.valueOf(angle)});
+                    roadLabels.add(new Object[]{Integer.valueOf(r), Float.valueOf(mid[0]), Float.valueOf(mid[1]), Float.valueOf(angle)});
                 }
             }
 
@@ -497,14 +505,12 @@ public class CanvasMapView extends View {
                     int mi = screenPts.size() / 2;
                     float[] mid = screenPts.get(mi);
                     float angle = calcRoadAngle(screenPts, mi);
-                    roadLabels.add(new Object[]{Integer.valueOf(currentRoadIndex), Float.valueOf(mid[
-                            0]), Float.valueOf(mid[1]), Float.valueOf(angle)});
+                    roadLabels.add(new Object[]{Integer.valueOf(currentRoadIndex), Float.valueOf(mid[0]), Float.valueOf(mid[1]), Float.valueOf(angle)});
                 }
             }
         }
 
         // ================= 优化：绘制控制点并自动抽稀 =================
-// ================= 优化：绘制控制点并自动抽稀 =================
         if (controlPoints != null && !controlPoints.isEmpty()) {
             Paint ctrlTextBg = new Paint();
             ctrlTextBg.setColor(0xE0FFFFFF); // 稍微带一点透明的纯白底
@@ -538,8 +544,7 @@ public class CanvasMapView extends View {
                 // 抽稀：距离已绘制的点太近（小于 60 像素）就不画
                 boolean tooClose = false;
                 for (float[] dp : drawnPixelPts) {
-                    float dist = (float) Math.sqrt(Math.pow(scrX - dp[0], 2) + Math.pow(scrY - dp[
-                                            1], 2));
+                    float dist = (float) Math.sqrt(Math.pow(scrX - dp[0], 2) + Math.pow(scrY - dp[1], 2));
                     if (dist < 60) {
                         tooClose = true;
                         break;
@@ -565,7 +570,6 @@ public class CanvasMapView extends View {
                 }
             }
         }
-// ==========================================================
         // ==========================================================
 
         if (hasGps) {
@@ -682,8 +686,7 @@ public class CanvasMapView extends View {
         return angleDeg;
     }
 
-    private void drawRoadNameLabels(Canvas canvas, int width, int height, List<
-                    Object[]> roadLabels) {
+    private void drawRoadNameLabels(Canvas canvas, int width, int height, List<Object[]> roadLabels) {
         if (roadNames == null || roadLabels == null || roadLabels.isEmpty()) return;
 
         Paint namePaint = new Paint();
@@ -749,6 +752,12 @@ public class CanvasMapView extends View {
     }
 
     private boolean drawTileWithFallback(Canvas canvas, int z, int x, int y, float screenX, float screenY) {
+        // 核心拦截：如果当前是空白底图模式，直接返回 true，不画任何方块
+        String urlTemplate = mapSources.get(currentMapIndex).urlTemplate;
+        if (urlTemplate != null && urlTemplate.startsWith("blank://")) {
+            return true;
+        }
+
         Bitmap targetTile = getTile(z, x, y);
         if (targetTile != null) {
             canvas.drawBitmap(targetTile, screenX, screenY, tilePaint);
@@ -901,6 +910,13 @@ public class CanvasMapView extends View {
     }
 
     private Bitmap getTile(int z, int x, int y) {
+        String urlTemplate = mapSources.get(currentMapIndex).urlTemplate;
+
+        // 如果是空白图层，直接返回 null，不要去请求网络
+        if (urlTemplate.startsWith("blank://")) {
+            return null;
+        }
+
         int maxTile = (int) Math.pow(2, z) - 1;
         if (x < 0 || y < 0 || x > maxTile || y > maxTile) return null;
         String key = currentMapIndex + "_" + z + "/" + x + "/" + y;
@@ -922,7 +938,6 @@ public class CanvasMapView extends View {
         if (downloadingKeys.contains(key)) return null;
         downloadingKeys.add(key);
 
-        String urlTemplate = mapSources.get(currentMapIndex).urlTemplate;
         final String urlStr = urlTemplate
                 .replace("{x}", String.valueOf(x))
                 .replace("{y}", String.valueOf(y))

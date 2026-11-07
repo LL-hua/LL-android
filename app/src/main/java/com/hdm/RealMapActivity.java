@@ -187,46 +187,53 @@ public class RealMapActivity extends BaseNavActivity {
     }
 
     private List<MapSource> loadMapSources() {
-        List<MapSource> sources = new ArrayList<>();
-        File sd = Environment.getExternalStorageDirectory();
-        File dir = new File(sd, "1hdm");
-        if (!dir.exists()) dir.mkdirs();
+    List<MapSource> sources = new ArrayList<>();
+    File sd = Environment.getExternalStorageDirectory();
+    File dir = new File(sd, "1hdm");
+    if (!dir.exists()) dir.mkdirs();
 
-        File file = new File(dir, "maps.txt");
-        if (!file.exists()) {
-            String defaultTxt = "谷歌路网,https://mt1.google.com/vt/lyrs=r&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}\n" +
-                    "谷歌卫星,https://mt1.google.com/vt/lyrs=y&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}\n" +
-                    "地形图,https://a.tile.opentopomap.org/{z}/{x}/{y}.png\n" +
-                    "OSM,https://tile.openstreetmap.org/{z}/{x}/{y}.png\n";
-            try {
-                FileOutputStream fos = new FileOutputStream(file);
-                fos.write(defaultTxt.getBytes("UTF-8"));
-                fos.close();
-            } catch (Exception e) {
-            }
-        }
-
+    File file = new File(dir, "maps.txt");
+    if (!file.exists()) {
+        String defaultTxt = "谷歌路网,https://mt1.google.com/vt/lyrs=r&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}\n" +
+                "谷歌卫星,https://mt1.google.com/vt/lyrs=y&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}\n" +
+                "地形图,https://a.tile.opentopomap.org/{z}/{x}/{y}.png\n" +
+                "OSM,https://tile.openstreetmap.org/{z}/{x}/{y}.png\n";
         try {
-            FileInputStream fis = new FileInputStream(file);
-            BufferedReader br = new BufferedReader(new InputStreamReader(fis, "UTF-8"));
-            String line;
-            while ((line = br.readLine()) != null) {
-                line = line.trim();
-                if (line.isEmpty() || line.startsWith("#")) continue;
-                String[] parts = line.split(",");
-                if (parts.length >= 2) {
-                    sources.add(new MapSource(parts[0].trim(), parts[1].trim()));
-                }
-            }
-            br.close();
+            FileOutputStream fos = new FileOutputStream(file);
+            fos.write(defaultTxt.getBytes("UTF-8"));
+            fos.close();
         } catch (Exception e) {
         }
-
-        if (sources.isEmpty()) {
-            sources.add(new MapSource("谷歌路网", "https://mt1.google.com/vt/lyrs=r&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}"));
-        }
-        return sources;
     }
+
+    try {
+        FileInputStream fis = new FileInputStream(file);
+        BufferedReader br = new BufferedReader(new InputStreamReader(fis, "UTF-8"));
+        String line;
+        while ((line = br.readLine()) != null) {
+            line = line.trim();
+            if (line.isEmpty() || line.startsWith("#")) continue;
+            String[] parts = line.split(",");
+            if (parts.length >= 2) {
+                sources.add(new MapSource(parts[0].trim(), parts[1].trim()));
+            }
+        }
+        br.close();
+    } catch (Exception e) {
+    }
+
+    if (sources.isEmpty()) {
+        sources.add(new MapSource("谷歌路网", "https://mt1.google.com/vt/lyrs=r&hl=zh-CN&gl=cn&x={x}&y={y}&z={z}"));
+    }
+
+    // ================= 新增：插入空白图层选项 =================
+    // 每次加载地图时，把这两个选项放在列表最前面
+    sources.add(0, new MapSource("白色底图)", "blank://white"));
+    sources.add(0, new MapSource("深色底图)", "blank://dark"));
+    // ==========================================================
+
+    return sources;
+}
 
     private void initUI() {
         content.removeAllViews();

@@ -19,7 +19,7 @@
         android:name=".MyApp"
         android:allowBackup="true"
         android:icon="@drawable/ico"
-        android:label="刘建华"
+        android:label="Road"
         android:usesCleartextTraffic="true"
         android:theme="@android:style/Theme.Light.NoTitleBar">
         
