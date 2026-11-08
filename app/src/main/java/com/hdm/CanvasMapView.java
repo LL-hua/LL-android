@@ -39,7 +39,7 @@ public class CanvasMapView extends View {
     private Paint gpsStrokePaint;
     private Paint ctrlPaint;
     private Paint cadPaint;
-    private Paint cadTextPaint; // CAD 文字画笔
+    private Paint cadTextPaint;
 
     private double centerLat = -4.8;
     private double centerLng = 32.5;
@@ -62,17 +62,44 @@ public class CanvasMapView extends View {
     // 控制点相关
     private List<Object[]> controlPoints = null;
 
-    // ================= CAD 图纸相关变量 =================
-    private List<double[][]> cadGeoLines = new ArrayList<>();
-    private List<List<double[]>> cadGeoPolylines = new ArrayList<>();
-    private List<double[]> cadGeoCircles = new ArrayList<>(); // [lat, lng, radius]
-    private List<Object[]> cadGeoTexts = new ArrayList<>(); // [lat, lng, text, height, rotation]
+    // ================= CAD 极致性能数据模型 =================
+    private static class CadLine {
+        float mx1, my1, mx2, my2;
+    }
+    private static class CadPolyline {
+        float[] pts; // [x1, y1, x2, y2, ...]
+    }
+    private static class CadCircle {
+        float cx, cy, rM;
+    }
+    private static class CadText {
+        float mx, my;
+        String text;
+        double height, rotation;
+    }
+
+    private List<CadLine> cadLines = new ArrayList<>();
+    private List<CadPolyline> cadPolylines = new ArrayList<>();
+    private List<CadCircle> cadCircles = new ArrayList<>();
+    private List<CadText> cadTexts = new ArrayList<>();
 
     // 控制 CAD 显示开关
     private boolean showCadLine = true;
     private boolean showCadPolyline = true;
     private boolean showCadCircle = true;
     private boolean showCadText = true;
+
+    // 全局缓冲池，杜绝 onDraw 里的 new 操作
+    private float[] lineBuffer = new float[400000]; 
+    private float[] polylineBuffer = new float[400000]; 
+
+    // 临时变量，避免 GC
+    private final float[] tmpMercator = new float[2]; 
+    private void latLngToMercatorFast(double lat, double lng) {
+        tmpMercator[0] = (float) ((lng + 180.0) / 360.0);
+        double sinLat = Math.sin(lat * Math.PI / 180.0);
+        tmpMercator[1] = (float) (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI));
+    }
     // ====================================================
 
     private List<List<Object[]>> multiRoadData;
@@ -145,7 +172,7 @@ public class CanvasMapView extends View {
         gpsStrokePaint.setAntiAlias(true);
 
         ctrlPaint = new Paint();
-        ctrlPaint.setColor(0xFF9C27B0);
+        ctrlPaint.setColor(0xFF9C27B0); // 紫色控制点
         ctrlPaint.setStyle(Paint.Style.FILL);
         ctrlPaint.setAntiAlias(true);
 
@@ -170,13 +197,8 @@ public class CanvasMapView extends View {
         };
     }
 
-    public double getCenterLatitude() {
-        return centerLat;
-    }
-
-    public double getCenterLongitude() {
-        return centerLng;
-    }
+    public double getCenterLatitude() { return centerLat; }
+    public double getCenterLongitude() { return centerLng; }
 
     public void setMapSources(List<MapSource> sources) {
         this.mapSources = sources;
@@ -191,13 +213,8 @@ public class CanvasMapView extends View {
         invalidate();
     }
 
-    public int getMapSourceIndex() {
-        return currentMapIndex;
-    }
-
-    public List<MapSource> getMapSources() {
-        return mapSources;
-    }
+    public int getMapSourceIndex() { return currentMapIndex; }
+    public List<MapSource> getMapSources() { return mapSources; }
 
     public void setShowRoadNames(boolean show) {
         this.showRoadNames = show;
@@ -223,34 +240,14 @@ public class CanvasMapView extends View {
         invalidate();
     }
 
-    public boolean isShowCadLine() {
-        return showCadLine;
-    }
-
-    public boolean isShowCadPolyline() {
-        return showCadPolyline;
-    }
-
-    public boolean isShowCadCircle() {
-        return showCadCircle;
-    }
-
-    public boolean isShowCadText() {
-        return showCadText;
-    }
-
-    // =================================================
+    public boolean isShowCadLine() { return showCadLine; }
+    public boolean isShowCadPolyline() { return showCadPolyline; }
+    public boolean isShowCadCircle() { return showCadCircle; }
+    public boolean isShowCadText() { return showCadText; }
 
     public void setCadEntities(List<com.hdm.cad.entity.EntityBase> entities) {
-        cadGeoLines.clear();
-        cadGeoPolylines.clear();
-        cadGeoCircles.clear();
-        cadGeoTexts.clear();
-
-        if (entities == null || entities.isEmpty()) {
-            invalidate();
-            return;
-        }
+        cadLines.clear(); cadPolylines.clear(); cadCircles.clear(); cadTexts.clear();
+        if (entities == null || entities.isEmpty()) { invalidate(); return; }
 
         MyApp app = (MyApp) getContext().getApplicationContext();
         if (app == null || app.data == null) return;
@@ -262,13 +259,16 @@ public class CanvasMapView extends View {
         for (com.hdm.cad.entity.EntityBase ent : entities) {
             if (ent instanceof com.hdm.cad.entity.BasicEntities.EntLine) {
                 com.hdm.cad.entity.BasicEntities.EntLine line = (com.hdm.cad.entity.BasicEntities.EntLine) ent;
-
-                // 强制 XY 对调
                 double[] lb1 = Projection.xy2Gps(line.start.y, line.start.x, app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
                 double[] lb2 = Projection.xy2Gps(line.end.y, line.end.x, app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
-
                 if (lb1 != null && lb2 != null && lb1[0] != 0 && lb2[0] != 0) {
-                    cadGeoLines.add(new double[][]{{lb1[1], lb1[0]}, {lb2[1], lb2[0]}});
+                    CadLine cl = new CadLine();
+                    latLngToMercatorFast(lb1[1], lb1[0]);
+                    cl.mx1 = tmpMercator[0]; cl.my1 = tmpMercator[1];
+                    latLngToMercatorFast(lb2[1], lb2[0]);
+                    cl.mx2 = tmpMercator[0]; cl.my2 = tmpMercator[1];
+                    cadLines.add(cl);
+                    
                     minLat = Math.min(minLat, Math.min(lb1[1], lb2[1]));
                     maxLat = Math.max(maxLat, Math.max(lb1[1], lb2[1]));
                     minLng = Math.min(minLng, Math.min(lb1[0], lb2[0]));
@@ -278,11 +278,16 @@ public class CanvasMapView extends View {
             } else if (ent instanceof com.hdm.cad.entity.BasicEntities.EntLwPolyline) {
                 com.hdm.cad.entity.BasicEntities.EntLwPolyline poly = (com.hdm.cad.entity.BasicEntities.EntLwPolyline) ent;
                 if (poly.vertices != null && poly.vertices.size() > 1) {
-                    List<double[]> polyGeo = new ArrayList<>();
+                    CadPolyline cp = new CadPolyline();
+                    cp.pts = new float[poly.vertices.size() * 2];
+                    int idx = 0;
                     for (com.hdm.cad.entity.EntityBase.Point2 pt : poly.vertices) {
                         double[] lb = Projection.xy2Gps(pt.y, pt.x, app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
                         if (lb != null && lb[0] != 0) {
-                            polyGeo.add(new double[]{lb[1], lb[0]});
+                            latLngToMercatorFast(lb[1], lb[0]);
+                            cp.pts[idx++] = tmpMercator[0]; 
+                            cp.pts[idx++] = tmpMercator[1];
+                            
                             minLat = Math.min(minLat, lb[1]);
                             maxLat = Math.max(maxLat, lb[1]);
                             minLng = Math.min(minLng, lb[0]);
@@ -290,13 +295,18 @@ public class CanvasMapView extends View {
                             hasValidData = true;
                         }
                     }
-                    if (polyGeo.size() > 1) cadGeoPolylines.add(polyGeo);
+                    if (idx > 0) cadPolylines.add(cp);
                 }
             } else if (ent instanceof com.hdm.cad.entity.BasicEntities.EntCircle) {
                 com.hdm.cad.entity.BasicEntities.EntCircle circle = (com.hdm.cad.entity.BasicEntities.EntCircle) ent;
                 double[] lb = Projection.xy2Gps(circle.center.y, circle.center.x, app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
                 if (lb != null && lb[0] != 0) {
-                    cadGeoCircles.add(new double[]{lb[1], lb[0], circle.radius});
+                    latLngToMercatorFast(lb[1], lb[0]);
+                    CadCircle cc = new CadCircle();
+                    cc.cx = tmpMercator[0]; cc.cy = tmpMercator[1];
+                    cc.rM = (float) (circle.radius / 40075016.68);
+                    cadCircles.add(cc);
+                    
                     minLat = Math.min(minLat, lb[1]);
                     maxLat = Math.max(maxLat, lb[1]);
                     minLng = Math.min(minLng, lb[0]);
@@ -307,7 +317,12 @@ public class CanvasMapView extends View {
                 com.hdm.cad.entity.BasicEntities.EntText txt = (com.hdm.cad.entity.BasicEntities.EntText) ent;
                 double[] lb = Projection.xy2Gps(txt.insertion.y, txt.insertion.x, app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
                 if (lb != null && lb[0] != 0 && txt.text != null && !txt.text.isEmpty()) {
-                    cadGeoTexts.add(new Object[]{lb[1], lb[0], txt.text, txt.height, txt.rotation});
+                    latLngToMercatorFast(lb[1], lb[0]);
+                    CadText ct = new CadText();
+                    ct.mx = tmpMercator[0]; ct.my = tmpMercator[1];
+                    ct.text = txt.text; ct.height = txt.height; ct.rotation = txt.rotation;
+                    cadTexts.add(ct);
+                    
                     minLat = Math.min(minLat, lb[1]);
                     maxLat = Math.max(maxLat, lb[1]);
                     minLng = Math.min(minLng, lb[0]);
@@ -316,7 +331,7 @@ public class CanvasMapView extends View {
                 }
             }
         }
-
+        
         invalidate();
 
         if (hasValidData) {
@@ -332,16 +347,17 @@ public class CanvasMapView extends View {
     }
 
     public boolean hasCadData() {
-        return !cadGeoLines.isEmpty() || !cadGeoPolylines.isEmpty() || !cadGeoCircles.isEmpty() || !cadGeoTexts.isEmpty();
+        return !cadLines.isEmpty() || !cadPolylines.isEmpty() || !cadCircles.isEmpty() || !cadTexts.isEmpty();
     }
 
     public void clearCad() {
-        cadGeoLines.clear();
-        cadGeoPolylines.clear();
-        cadGeoCircles.clear();
-        cadGeoTexts.clear();
+        cadLines.clear();
+        cadPolylines.clear();
+        cadCircles.clear();
+        cadTexts.clear();
         invalidate();
     }
+    // ====================================================
 
     public void setMultiRouteData(List<List<Object[]>> multiData, List<String> names) {
         this.multiRoadData = multiData;
@@ -380,10 +396,7 @@ public class CanvasMapView extends View {
     }
 
     private void fitToRoute(List<Object[]> route) {
-        if (route == null || route.isEmpty()) {
-            invalidate();
-            return;
-        }
+        if (route == null || route.isEmpty()) { invalidate(); return; }
         double minLat = Double.MAX_VALUE, maxLat = -Double.MAX_VALUE;
         double minLng = Double.MAX_VALUE, maxLng = -Double.MAX_VALUE;
         for (Object[] pt : route) {
@@ -526,7 +539,7 @@ public class CanvasMapView extends View {
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
-
+        
         String url = mapSources.get(currentMapIndex).urlTemplate;
         if ("blank://dark".equals(url)) {
             canvas.drawColor(0xFF2B2D30);
@@ -601,8 +614,7 @@ public class CanvasMapView extends View {
                     int mi = screenPts.size() / 2;
                     float[] mid = screenPts.get(mi);
                     float angle = calcRoadAngle(screenPts, mi);
-                    roadLabels.add(new Object[]{Integer.valueOf(r), Float.valueOf(mid[
-                            0]), Float.valueOf(mid[1]), Float.valueOf(angle)});
+                    roadLabels.add(new Object[]{Integer.valueOf(r), Float.valueOf(mid[0]), Float.valueOf(mid[1]), Float.valueOf(angle)});
                 }
             }
 
@@ -660,8 +672,7 @@ public class CanvasMapView extends View {
                     int mi = screenPts.size() / 2;
                     float[] mid = screenPts.get(mi);
                     float angle = calcRoadAngle(screenPts, mi);
-                    roadLabels.add(new Object[]{Integer.valueOf(currentRoadIndex), Float.valueOf(mid[
-                            0]), Float.valueOf(mid[1]), Float.valueOf(angle)});
+                    roadLabels.add(new Object[]{Integer.valueOf(currentRoadIndex), Float.valueOf(mid[0]), Float.valueOf(mid[1]), Float.valueOf(angle)});
                 }
             }
         }
@@ -696,8 +707,7 @@ public class CanvasMapView extends View {
 
                 boolean tooClose = false;
                 for (float[] dp : drawnPixelPts) {
-                    float dist = (float) Math.sqrt(Math.pow(scrX - dp[0], 2) + Math.pow(scrY - dp[
-                                            1], 2));
+                    float dist = (float) Math.sqrt(Math.pow(scrX - dp[0], 2) + Math.pow(scrY - dp[1], 2));
                     if (dist < 60) {
                         tooClose = true;
                         break;
@@ -767,86 +777,110 @@ public class CanvasMapView extends View {
             drawRoadNameLabels(canvas, width, height, roadLabels);
         }
 
-        // ================= 绘制真实地理坐标的 CAD 图纸 =================
+        // ================= 绘制极致性能的 DWG 图纸 =================
         if (hasCadData()) {
-
+            float worldSize = (float) (256 * Math.pow(2, tileZoom));
+            
             // 1. 画直线
-            if (showCadLine) {
-                for (double[][] line : cadGeoLines) {
-                    double[] p1 = latLngToWorldPixel(line[0][0], line[0][1], tileZoom);
-                    double[] p2 = latLngToWorldPixel(line[1][0], line[1][1], tileZoom);
-                    float x1 = (float) ((p1[0] - startX) * totalScale);
-                    float y1 = (float) ((p1[1] - startY) * totalScale);
-                    float x2 = (float) ((p2[0] - startX) * totalScale);
-                    float y2 = (float) ((p2[1] - startY) * totalScale);
-                    canvas.drawLine(x1, y1, x2, y2, cadPaint);
+            if (showCadLine && !cadLines.isEmpty()) {
+                int bufferIdx = 0;
+                for (CadLine line : cadLines) {
+                    float dxWorld = (line.mx2 - line.mx1) * worldSize;
+                    float dyWorld = (line.my2 - line.my1) * worldSize;
+                    
+                    // LOD：尺寸极小的线段剔除
+                    if (Math.abs(dxWorld) * totalScale < 0.5f && Math.abs(dyWorld) * totalScale < 0.5f) continue;
+
+                    // 视口剔除核心：计算屏幕坐标 (加上 float 强转)
+                    float sx1 = (float) ((line.mx1 * worldSize - startX) * totalScale);
+                    float sy1 = (float) ((line.my1 * worldSize - startY) * totalScale);
+                    float sx2 = (float) ((line.mx2 * worldSize - startX) * totalScale);
+                    float sy2 = (float) ((line.my2 * worldSize - startY) * totalScale);
+
+                    // 如果线段的包围盒完全在屏幕外，直接跳过
+                    if (sx1 < 0 && sx2 < 0) continue;
+                    if (sx1 > width && sx2 > width) continue;
+                    if (sy1 < 0 && sy2 < 0) continue;
+                    if (sy1 > height && sy2 > height) continue;
+
+                    if (bufferIdx + 4 > lineBuffer.length) {
+                        canvas.drawLines(lineBuffer, 0, bufferIdx, cadPaint);
+                        bufferIdx = 0;
+                    }
+                    lineBuffer[bufferIdx++] = sx1;
+                    lineBuffer[bufferIdx++] = sy1;
+                    lineBuffer[bufferIdx++] = sx2;
+                    lineBuffer[bufferIdx++] = sy2;
                 }
+                if (bufferIdx > 0) canvas.drawLines(lineBuffer, 0, bufferIdx, cadPaint);
             }
 
-            // 2. 画多段线
-            if (showCadPolyline) {
-                for (List<double[]> poly : cadGeoPolylines) {
-                    Path path = new Path();
-                    for (int i = 0; i < poly.size(); i++) {
-                        double[] pt = poly.get(i);
-                        double[] px = latLngToWorldPixel(pt[0], pt[1], tileZoom);
-                        float sx = (float) ((px[0] - startX) * totalScale);
-                        float sy = (float) ((px[1] - startY) * totalScale);
-                        if (i == 0) path.moveTo(sx, sy);
-                        else path.lineTo(sx, sy);
+            // 2. 画多段线 (改用 drawLines 替代 drawPath)
+            if (showCadPolyline && !cadPolylines.isEmpty()) {
+                int pBufferIdx = 0;
+                for (CadPolyline poly : cadPolylines) {
+                    if (poly.pts.length < 4) continue;
+
+                    // 遍历每相邻两个点，生成线段
+                    for (int i = 0; i < poly.pts.length - 2; i += 2) {
+                        float sx1 = (float) ((poly.pts[i] * worldSize - startX) * totalScale);
+                        float sy1 = (float) ((poly.pts[i+1] * worldSize - startY) * totalScale);
+                        float sx2 = (float) ((poly.pts[i+2] * worldSize - startX) * totalScale);
+                        float sy2 = (float) ((poly.pts[i+3] * worldSize - startY) * totalScale);
+
+                        // 视口剔除
+                        if (sx1 < 0 && sx2 < 0) continue;
+                        if (sx1 > width && sx2 > width) continue;
+                        if (sy1 < 0 && sy2 < 0) continue;
+                        if (sy1 > height && sy2 > height) continue;
+
+                        if (pBufferIdx + 4 > polylineBuffer.length) {
+                            canvas.drawLines(polylineBuffer, 0, pBufferIdx, cadPaint);
+                            pBufferIdx = 0;
+                        }
+                        polylineBuffer[pBufferIdx++] = sx1;
+                        polylineBuffer[pBufferIdx++] = sy1;
+                        polylineBuffer[pBufferIdx++] = sx2;
+                        polylineBuffer[pBufferIdx++] = sy2;
                     }
-                    canvas.drawPath(path, cadPaint);
                 }
+                if (pBufferIdx > 0) canvas.drawLines(polylineBuffer, 0, pBufferIdx, cadPaint);
             }
 
             // 3. 画圆
-            if (showCadCircle) {
-                for (double[] circle : cadGeoCircles) {
-                    double[] c = latLngToWorldPixel(circle[0], circle[1], tileZoom);
-                    float cx = (float) ((c[0] - startX) * totalScale);
-                    float cy = (float) ((c[1] - startY) * totalScale);
-                    float rPixels = (float) (circle[
-                                    2] / 111000.0 * 256 * Math.pow(2, tileZoom) * totalScale);
-                    canvas.drawCircle(cx, cy, rPixels, cadPaint);
+            if (showCadCircle && !cadCircles.isEmpty()) {
+                for (CadCircle circle : cadCircles) {
+                    float rPx = circle.rM * worldSize * totalScale;
+                    if (rPx < 0.5f) continue; 
+
+                    float cx = (float) ((circle.cx * worldSize - startX) * totalScale);
+                    float cy = (float) ((circle.cy * worldSize - startY) * totalScale);
+
+                    // 视口剔除
+                    if (cx + rPx < 0 || cx - rPx > width || cy + rPx < 0 || cy - rPx > height) continue;
+
+                    canvas.drawCircle(cx, cy, rPx, cadPaint);
                 }
             }
 
             // 4. 画文字
-            // 4. 画文字
-            if (showCadText) {
-                // 计算当前屏幕 1 像素代表多少米
-                double metersPerScreenPixel = 156543.03392 * Math.cos(centerLat * Math.PI / 180.0)
-                        / (Math.pow(2, tileZoom) * totalScale);
+            if (showCadText && !cadTexts.isEmpty()) {
+                double metersPerScreenPixel = 156543.03392 * Math.cos(centerLat * Math.PI / 180.0) / (Math.pow(2, tileZoom) * totalScale);
+                for (CadText txt : cadTexts) {
+                    float textSizePx = (float) (txt.height / metersPerScreenPixel);
+                    if (textSizePx < 10f) continue; 
 
-                for (Object[] txt : cadGeoTexts) {
-                    double lat = (Double) txt[0];
-                    double lng = (Double) txt[1];
-                    String text = (String) txt[2];
-                    double cadTextH = (Double) txt[3]; // CAD 真实字高（单位：米）
-                    double rot = (Double) txt[4];
+                    float cx = (float) ((txt.mx * worldSize - startX) * totalScale);
+                    float cy = (float) ((txt.my * worldSize - startY) * totalScale);
 
-                    if (text == null || text.trim().isEmpty()) continue;
-
-                    // 将 CAD 字高（米）转换为当前屏幕像素
-                    float textSizePx = (float) (cadTextH / metersPerScreenPixel);
-
-                    // 核心：如果算出来的字高小于 10 像素，直接不画！
-                    // 因为 10 像素以下的字会糊成一团，并且极大地拖慢渲染速度。
-                    // 当你双指放大时，textSizePx 自然会变大，字就会浮现出来。
-                    if (textSizePx < 10f) {
-                        continue;
-                    }
+                    // 视口剔除：字完全在屏幕外就直接不画
+                    if (cx < -100 || cx > width + 100 || cy < -100 || cy > height + 100) continue;
 
                     cadTextPaint.setTextSize(textSizePx);
-
-                    double[] px = latLngToWorldPixel(lat, lng, tileZoom);
-                    float cx = (float) ((px[0] - startX) * totalScale);
-                    float cy = (float) ((px[1] - startY) * totalScale);
-
                     canvas.save();
                     canvas.translate(cx, cy);
-                    canvas.rotate((float) -Math.toDegrees(rot));
-                    canvas.drawText(text, 0, 0, cadTextPaint);
+                    canvas.rotate((float) -Math.toDegrees(txt.rotation));
+                    canvas.drawText(txt.text, 0, 0, cadTextPaint);
                     canvas.restore();
                 }
             }
@@ -920,8 +954,7 @@ public class CanvasMapView extends View {
         return angleDeg;
     }
 
-    private void drawRoadNameLabels(Canvas canvas, int width, int height, List<
-                    Object[]> roadLabels) {
+    private void drawRoadNameLabels(Canvas canvas, int width, int height, List<Object[]> roadLabels) {
         if (roadNames == null || roadLabels == null || roadLabels.isEmpty()) return;
 
         Paint namePaint = new Paint();
