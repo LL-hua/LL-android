@@ -62,18 +62,21 @@ public class CanvasMapView extends View {
     // 控制点相关
     private List<Object[]> controlPoints = null;
 
-    // ================= CAD 极致性能数据模型 =================
+    // ================= CAD 极致精度数据模型 (全面升级为 double) =================
     private static class CadLine {
-        float mx1, my1, mx2, my2;
+        double mx1, my1, mx2, my2;
     }
+
     private static class CadPolyline {
-        float[] pts; // [x1, y1, x2, y2, ...]
+        double[] pts;
     }
+
     private static class CadCircle {
-        float cx, cy, rM;
+        double cx, cy, rM;
     }
+
     private static class CadText {
-        float mx, my;
+        double mx, my;
         String text;
         double height, rotation;
     }
@@ -89,17 +92,19 @@ public class CanvasMapView extends View {
     private boolean showCadCircle = true;
     private boolean showCadText = true;
 
-    // 全局缓冲池，杜绝 onDraw 里的 new 操作
-    private float[] lineBuffer = new float[400000]; 
-    private float[] polylineBuffer = new float[400000]; 
+    // 全局缓冲池 (Canvas 绘制必须用 float，所以这里保持 float，仅在计算时使用 double)
+    private float[] lineBuffer = new float[400000];
+    private float[] polylineBuffer = new float[400000];
 
     // 临时变量，避免 GC
-    private final float[] tmpMercator = new float[2]; 
+    private final double[] tmpMercator = new double[2];
+
     private void latLngToMercatorFast(double lat, double lng) {
-        tmpMercator[0] = (float) ((lng + 180.0) / 360.0);
+        tmpMercator[0] = (lng + 180.0) / 360.0;
         double sinLat = Math.sin(lat * Math.PI / 180.0);
-        tmpMercator[1] = (float) (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI));
+        tmpMercator[1] = 0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI);
     }
+
     // ====================================================
 
     private List<List<Object[]>> multiRoadData;
@@ -172,7 +177,7 @@ public class CanvasMapView extends View {
         gpsStrokePaint.setAntiAlias(true);
 
         ctrlPaint = new Paint();
-        ctrlPaint.setColor(0xFF9C27B0); // 紫色控制点
+        ctrlPaint.setColor(0xFF9C27B0);
         ctrlPaint.setStyle(Paint.Style.FILL);
         ctrlPaint.setAntiAlias(true);
 
@@ -180,7 +185,7 @@ public class CanvasMapView extends View {
         cadPaint.setStyle(Paint.Style.STROKE);
         cadPaint.setAntiAlias(true);
         cadPaint.setStrokeWidth(3f);
-        cadPaint.setColor(0xFFE53935); // CAD 红色
+        cadPaint.setColor(0xFFE53935);
 
         cadTextPaint = new Paint();
         cadTextPaint.setAntiAlias(true);
@@ -197,8 +202,13 @@ public class CanvasMapView extends View {
         };
     }
 
-    public double getCenterLatitude() { return centerLat; }
-    public double getCenterLongitude() { return centerLng; }
+    public double getCenterLatitude() {
+        return centerLat;
+    }
+
+    public double getCenterLongitude() {
+        return centerLng;
+    }
 
     public void setMapSources(List<MapSource> sources) {
         this.mapSources = sources;
@@ -213,8 +223,13 @@ public class CanvasMapView extends View {
         invalidate();
     }
 
-    public int getMapSourceIndex() { return currentMapIndex; }
-    public List<MapSource> getMapSources() { return mapSources; }
+    public int getMapSourceIndex() {
+        return currentMapIndex;
+    }
+
+    public List<MapSource> getMapSources() {
+        return mapSources;
+    }
 
     public void setShowRoadNames(boolean show) {
         this.showRoadNames = show;
@@ -240,14 +255,68 @@ public class CanvasMapView extends View {
         invalidate();
     }
 
-    public boolean isShowCadLine() { return showCadLine; }
-    public boolean isShowCadPolyline() { return showCadPolyline; }
-    public boolean isShowCadCircle() { return showCadCircle; }
-    public boolean isShowCadText() { return showCadText; }
+    public boolean isShowCadLine() {
+        return showCadLine;
+    }
+
+    public boolean isShowCadPolyline() {
+        return showCadPolyline;
+    }
+
+    public boolean isShowCadCircle() {
+        return showCadCircle;
+    }
+
+    public boolean isShowCadText() {
+        return showCadText;
+    }
+
+    // ================= 圆弧插值算法 (保留你的完美公式) =================
+    private void addArcPoints(List<
+                    com.hdm.cad.entity.EntityBase.Point2> outPts, double x1, double y1, double x2, double y2, double b) {
+        if (Math.abs(b) < 1e-6) {
+            outPts.add(new com.hdm.cad.entity.EntityBase.Point2(x2, y2));
+            return;
+        }
+
+        double dx = x2 - x1;
+        double dy = y2 - y1;
+        double d = Math.sqrt(dx * dx + dy * dy);
+        if (d < 1e-6) {
+            outPts.add(new com.hdm.cad.entity.EntityBase.Point2(x2, y2));
+            return;
+        }
+
+        double coef = (1.0 - b * b) / (4.0 * b);
+        double cx = (x1 + x2) / 2.0 - dy * coef;
+        double cy = (y1 + y2) / 2.0 + dx * coef;
+
+        double r = Math.sqrt((x1 - cx) * (x1 - cx) + (y1 - cy) * (y1 - cy));
+
+        double startAngle = Math.atan2(y1 - cy, x1 - cx);
+        double theta = 4.0 * Math.atan(b);
+
+        // 强制细分 32 段，保证足够圆滑
+        int segments = 32;
+        double angleStep = theta / segments;
+
+        for (int i = 1; i <= segments; i++) {
+            double angle = startAngle + i * angleStep;
+            double px = cx + r * Math.cos(angle);
+            double py = cy + r * Math.sin(angle);
+            outPts.add(new com.hdm.cad.entity.EntityBase.Point2(px, py));
+        }
+    }
 
     public void setCadEntities(List<com.hdm.cad.entity.EntityBase> entities) {
-        cadLines.clear(); cadPolylines.clear(); cadCircles.clear(); cadTexts.clear();
-        if (entities == null || entities.isEmpty()) { invalidate(); return; }
+        cadLines.clear();
+        cadPolylines.clear();
+        cadCircles.clear();
+        cadTexts.clear();
+        if (entities == null || entities.isEmpty()) {
+            invalidate();
+            return;
+        }
 
         MyApp app = (MyApp) getContext().getApplicationContext();
         if (app == null || app.data == null) return;
@@ -264,11 +333,13 @@ public class CanvasMapView extends View {
                 if (lb1 != null && lb2 != null && lb1[0] != 0 && lb2[0] != 0) {
                     CadLine cl = new CadLine();
                     latLngToMercatorFast(lb1[1], lb1[0]);
-                    cl.mx1 = tmpMercator[0]; cl.my1 = tmpMercator[1];
+                    cl.mx1 = tmpMercator[0];
+                    cl.my1 = tmpMercator[1];
                     latLngToMercatorFast(lb2[1], lb2[0]);
-                    cl.mx2 = tmpMercator[0]; cl.my2 = tmpMercator[1];
+                    cl.mx2 = tmpMercator[0];
+                    cl.my2 = tmpMercator[1];
                     cadLines.add(cl);
-                    
+
                     minLat = Math.min(minLat, Math.min(lb1[1], lb2[1]));
                     maxLat = Math.max(maxLat, Math.max(lb1[1], lb2[1]));
                     minLng = Math.min(minLng, Math.min(lb1[0], lb2[0]));
@@ -278,16 +349,43 @@ public class CanvasMapView extends View {
             } else if (ent instanceof com.hdm.cad.entity.BasicEntities.EntLwPolyline) {
                 com.hdm.cad.entity.BasicEntities.EntLwPolyline poly = (com.hdm.cad.entity.BasicEntities.EntLwPolyline) ent;
                 if (poly.vertices != null && poly.vertices.size() > 1) {
-                    CadPolyline cp = new CadPolyline();
-                    cp.pts = new float[poly.vertices.size() * 2];
-                    int idx = 0;
-                    for (com.hdm.cad.entity.EntityBase.Point2 pt : poly.vertices) {
+
+                    List<com.hdm.cad.entity.EntityBase.Point2> expandedPts = new ArrayList<>();
+                    expandedPts.add(poly.vertices.get(0));
+
+                    for (int i = 0; i < poly.vertices.size() - 1; i++) {
+                        com.hdm.cad.entity.EntityBase.Point2 p1 = poly.vertices.get(i);
+                        com.hdm.cad.entity.EntityBase.Point2 p2 = poly.vertices.get(i + 1);
+                        double b = (poly.bulges != null && i < poly.bulges.length) ? poly.bulges[
+                                i] : 0.0;
+
+                        if (Math.abs(b) < 1e-6) {
+                            expandedPts.add(p2);
+                        } else {
+                            addArcPoints(expandedPts, p1.x, p1.y, p2.x, p2.y, b);
+                        }
+                    }
+
+                    if ((poly.flags & 0x200) != 0 && poly.vertices.size() > 2) {
+                        com.hdm.cad.entity.EntityBase.Point2 lastPt = poly.vertices.get(poly.vertices.size() - 1);
+                        com.hdm.cad.entity.EntityBase.Point2 firstPt = poly.vertices.get(0);
+                        double lastBulge = (poly.bulges != null && poly.bulges.length == poly.vertices.size())
+                                ? poly.bulges[poly.vertices.size() - 1] : 0.0;
+                        if (Math.abs(lastBulge) < 1e-6) {
+                            expandedPts.add(firstPt);
+                        } else {
+                            addArcPoints(expandedPts, lastPt.x, lastPt.y, firstPt.x, firstPt.y, lastBulge);
+                        }
+                    }
+
+                    List<Double> validCoords = new ArrayList<>();
+                    for (com.hdm.cad.entity.EntityBase.Point2 pt : expandedPts) {
                         double[] lb = Projection.xy2Gps(pt.y, pt.x, app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
                         if (lb != null && lb[0] != 0) {
                             latLngToMercatorFast(lb[1], lb[0]);
-                            cp.pts[idx++] = tmpMercator[0]; 
-                            cp.pts[idx++] = tmpMercator[1];
-                            
+                            validCoords.add(tmpMercator[0]);
+                            validCoords.add(tmpMercator[1]);
+
                             minLat = Math.min(minLat, lb[1]);
                             maxLat = Math.max(maxLat, lb[1]);
                             minLng = Math.min(minLng, lb[0]);
@@ -295,18 +393,77 @@ public class CanvasMapView extends View {
                             hasValidData = true;
                         }
                     }
-                    if (idx > 0) cadPolylines.add(cp);
+
+                    if (validCoords.size() >= 4) {
+                        CadPolyline cp = new CadPolyline();
+                        cp.pts = new double[validCoords.size()];
+                        for (int k = 0; k < validCoords.size(); k++) {
+                            cp.pts[k] = validCoords.get(k);
+                        }
+                        cadPolylines.add(cp);
+                    }
                 }
+            } else if (ent instanceof com.hdm.cad.entity.BasicEntities.EntArc) {
+                // ================= 专门处理独立的圆弧 (ARC) =================
+                com.hdm.cad.entity.BasicEntities.EntArc arc = (com.hdm.cad.entity.BasicEntities.EntArc) ent;
+
+                // 1. 在纯 CAD 坐标系里计算扫掠角度
+                double startA = arc.angleStart;
+                double endA = arc.angleEnd;
+                // 确保逆时针扫掠（如果终点小于起点，加 2π）
+                while (endA < startA) {
+                    endA += 2 * Math.PI;
+                }
+                double sweep = endA - startA;
+
+                int segments = 32; // 分段数，越大越平滑
+                double step = sweep / segments;
+
+                List<Double> validCoords = new ArrayList<>();
+
+                for (int i = 0; i <= segments; i++) {
+                    double angle = startA + step * i;
+
+                    // 纯 CAD 坐标下的点
+                    double cadX = arc.center.x + arc.radius * Math.cos(angle);
+                    double cadY = arc.center.y + arc.radius * Math.sin(angle);
+
+                    // 统一转换：CAD的Y给工程X，CAD的X给工程Y
+                    double[] lb = Projection.xy2Gps(cadY, cadX, app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
+
+                    if (lb != null && lb[0] != 0) {
+                        latLngToMercatorFast(lb[1], lb[0]);
+                        validCoords.add(tmpMercator[0]);
+                        validCoords.add(tmpMercator[1]);
+
+                        minLat = Math.min(minLat, lb[1]);
+                        maxLat = Math.max(maxLat, lb[1]);
+                        minLng = Math.min(minLng, lb[0]);
+                        maxLng = Math.max(maxLng, lb[0]);
+                        hasValidData = true;
+                    }
+                }
+
+                if (validCoords.size() >= 4) {
+                    CadPolyline cp = new CadPolyline();
+                    cp.pts = new double[validCoords.size()];
+                    for (int k = 0; k < validCoords.size(); k++) {
+                        cp.pts[k] = validCoords.get(k);
+                    }
+                    cadPolylines.add(cp);
+                }
+                // ==============================================================
             } else if (ent instanceof com.hdm.cad.entity.BasicEntities.EntCircle) {
                 com.hdm.cad.entity.BasicEntities.EntCircle circle = (com.hdm.cad.entity.BasicEntities.EntCircle) ent;
                 double[] lb = Projection.xy2Gps(circle.center.y, circle.center.x, app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
                 if (lb != null && lb[0] != 0) {
                     latLngToMercatorFast(lb[1], lb[0]);
                     CadCircle cc = new CadCircle();
-                    cc.cx = tmpMercator[0]; cc.cy = tmpMercator[1];
-                    cc.rM = (float) (circle.radius / 40075016.68);
+                    cc.cx = tmpMercator[0];
+                    cc.cy = tmpMercator[1];
+                    cc.rM = (circle.radius / 40075016.68);
                     cadCircles.add(cc);
-                    
+
                     minLat = Math.min(minLat, lb[1]);
                     maxLat = Math.max(maxLat, lb[1]);
                     minLng = Math.min(minLng, lb[0]);
@@ -319,10 +476,13 @@ public class CanvasMapView extends View {
                 if (lb != null && lb[0] != 0 && txt.text != null && !txt.text.isEmpty()) {
                     latLngToMercatorFast(lb[1], lb[0]);
                     CadText ct = new CadText();
-                    ct.mx = tmpMercator[0]; ct.my = tmpMercator[1];
-                    ct.text = txt.text; ct.height = txt.height; ct.rotation = txt.rotation;
+                    ct.mx = tmpMercator[0];
+                    ct.my = tmpMercator[1];
+                    ct.text = txt.text;
+                    ct.height = txt.height;
+                    ct.rotation = txt.rotation;
                     cadTexts.add(ct);
-                    
+
                     minLat = Math.min(minLat, lb[1]);
                     maxLat = Math.max(maxLat, lb[1]);
                     minLng = Math.min(minLng, lb[0]);
@@ -331,7 +491,7 @@ public class CanvasMapView extends View {
                 }
             }
         }
-        
+
         invalidate();
 
         if (hasValidData) {
@@ -357,6 +517,7 @@ public class CanvasMapView extends View {
         cadTexts.clear();
         invalidate();
     }
+
     // ====================================================
 
     public void setMultiRouteData(List<List<Object[]>> multiData, List<String> names) {
@@ -396,7 +557,10 @@ public class CanvasMapView extends View {
     }
 
     private void fitToRoute(List<Object[]> route) {
-        if (route == null || route.isEmpty()) { invalidate(); return; }
+        if (route == null || route.isEmpty()) {
+            invalidate();
+            return;
+        }
         double minLat = Double.MAX_VALUE, maxLat = -Double.MAX_VALUE;
         double minLng = Double.MAX_VALUE, maxLng = -Double.MAX_VALUE;
         for (Object[] pt : route) {
@@ -435,7 +599,7 @@ public class CanvasMapView extends View {
             float scale = Math.min(scaleX, scaleY);
             calculatedZoom = (float) (tileZoom + Math.log(scale) / Math.log(2));
             if (calculatedZoom < 3.0f) calculatedZoom = 3.0f;
-            if (calculatedZoom > 18.0f) calculatedZoom = 18.0f;
+            if (calculatedZoom > 22.0f) calculatedZoom = 22.0f; // 提升到 22 级
             if (Float.isNaN(calculatedZoom)) calculatedZoom = 15.0f;
         }
         final float targetZoom = calculatedZoom;
@@ -539,7 +703,7 @@ public class CanvasMapView extends View {
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
-        
+
         String url = mapSources.get(currentMapIndex).urlTemplate;
         if ("blank://dark".equals(url)) {
             canvas.drawColor(0xFF2B2D30);
@@ -614,7 +778,8 @@ public class CanvasMapView extends View {
                     int mi = screenPts.size() / 2;
                     float[] mid = screenPts.get(mi);
                     float angle = calcRoadAngle(screenPts, mi);
-                    roadLabels.add(new Object[]{Integer.valueOf(r), Float.valueOf(mid[0]), Float.valueOf(mid[1]), Float.valueOf(angle)});
+                    roadLabels.add(new Object[]{Integer.valueOf(r), Float.valueOf(mid[
+                            0]), Float.valueOf(mid[1]), Float.valueOf(angle)});
                 }
             }
 
@@ -672,7 +837,8 @@ public class CanvasMapView extends View {
                     int mi = screenPts.size() / 2;
                     float[] mid = screenPts.get(mi);
                     float angle = calcRoadAngle(screenPts, mi);
-                    roadLabels.add(new Object[]{Integer.valueOf(currentRoadIndex), Float.valueOf(mid[0]), Float.valueOf(mid[1]), Float.valueOf(angle)});
+                    roadLabels.add(new Object[]{Integer.valueOf(currentRoadIndex), Float.valueOf(mid[
+                            0]), Float.valueOf(mid[1]), Float.valueOf(angle)});
                 }
             }
         }
@@ -707,7 +873,8 @@ public class CanvasMapView extends View {
 
                 boolean tooClose = false;
                 for (float[] dp : drawnPixelPts) {
-                    float dist = (float) Math.sqrt(Math.pow(scrX - dp[0], 2) + Math.pow(scrY - dp[1], 2));
+                    float dist = (float) Math.sqrt(Math.pow(scrX - dp[0], 2) + Math.pow(scrY - dp[
+                                            1], 2));
                     if (dist < 60) {
                         tooClose = true;
                         break;
@@ -777,27 +944,25 @@ public class CanvasMapView extends View {
             drawRoadNameLabels(canvas, width, height, roadLabels);
         }
 
-        // ================= 绘制极致性能的 DWG 图纸 =================
+        // ================= 绘制极致精度 DWG 图纸 =================
         if (hasCadData()) {
-            float worldSize = (float) (256 * Math.pow(2, tileZoom));
-            
-            // 1. 画直线
+            double worldSize = 256 * Math.pow(2, tileZoom);
+
+            // 1. 画直线 (使用 double 计算，最后转 float)
             if (showCadLine && !cadLines.isEmpty()) {
                 int bufferIdx = 0;
                 for (CadLine line : cadLines) {
-                    float dxWorld = (line.mx2 - line.mx1) * worldSize;
-                    float dyWorld = (line.my2 - line.my1) * worldSize;
-                    
-                    // LOD：尺寸极小的线段剔除
-                    if (Math.abs(dxWorld) * totalScale < 0.5f && Math.abs(dyWorld) * totalScale < 0.5f) continue;
+                    double dxWorld = (line.mx2 - line.mx1) * worldSize;
+                    double dyWorld = (line.my2 - line.my1) * worldSize;
 
-                    // 视口剔除核心：计算屏幕坐标 (加上 float 强转)
+                    if (Math.abs(dxWorld) * totalScale < 0.5f && Math.abs(dyWorld) * totalScale < 0.5f)
+                        continue;
+
                     float sx1 = (float) ((line.mx1 * worldSize - startX) * totalScale);
                     float sy1 = (float) ((line.my1 * worldSize - startY) * totalScale);
                     float sx2 = (float) ((line.mx2 * worldSize - startX) * totalScale);
                     float sy2 = (float) ((line.my2 * worldSize - startY) * totalScale);
 
-                    // 如果线段的包围盒完全在屏幕外，直接跳过
                     if (sx1 < 0 && sx2 < 0) continue;
                     if (sx1 > width && sx2 > width) continue;
                     if (sy1 < 0 && sy2 < 0) continue;
@@ -815,20 +980,18 @@ public class CanvasMapView extends View {
                 if (bufferIdx > 0) canvas.drawLines(lineBuffer, 0, bufferIdx, cadPaint);
             }
 
-            // 2. 画多段线 (改用 drawLines 替代 drawPath)
+            // 2. 画多段线 (使用 double 计算，最后转 float)
             if (showCadPolyline && !cadPolylines.isEmpty()) {
                 int pBufferIdx = 0;
                 for (CadPolyline poly : cadPolylines) {
                     if (poly.pts.length < 4) continue;
 
-                    // 遍历每相邻两个点，生成线段
                     for (int i = 0; i < poly.pts.length - 2; i += 2) {
                         float sx1 = (float) ((poly.pts[i] * worldSize - startX) * totalScale);
-                        float sy1 = (float) ((poly.pts[i+1] * worldSize - startY) * totalScale);
-                        float sx2 = (float) ((poly.pts[i+2] * worldSize - startX) * totalScale);
-                        float sy2 = (float) ((poly.pts[i+3] * worldSize - startY) * totalScale);
+                        float sy1 = (float) ((poly.pts[i + 1] * worldSize - startY) * totalScale);
+                        float sx2 = (float) ((poly.pts[i + 2] * worldSize - startX) * totalScale);
+                        float sy2 = (float) ((poly.pts[i + 3] * worldSize - startY) * totalScale);
 
-                        // 视口剔除
                         if (sx1 < 0 && sx2 < 0) continue;
                         if (sx1 > width && sx2 > width) continue;
                         if (sy1 < 0 && sy2 < 0) continue;
@@ -850,14 +1013,14 @@ public class CanvasMapView extends View {
             // 3. 画圆
             if (showCadCircle && !cadCircles.isEmpty()) {
                 for (CadCircle circle : cadCircles) {
-                    float rPx = circle.rM * worldSize * totalScale;
-                    if (rPx < 0.5f) continue; 
+                    float rPx = (float) (circle.rM * worldSize * totalScale);
+                    if (rPx < 0.5f) continue;
 
                     float cx = (float) ((circle.cx * worldSize - startX) * totalScale);
                     float cy = (float) ((circle.cy * worldSize - startY) * totalScale);
 
-                    // 视口剔除
-                    if (cx + rPx < 0 || cx - rPx > width || cy + rPx < 0 || cy - rPx > height) continue;
+                    if (cx + rPx < 0 || cx - rPx > width || cy + rPx < 0 || cy - rPx > height)
+                        continue;
 
                     canvas.drawCircle(cx, cy, rPx, cadPaint);
                 }
@@ -868,12 +1031,11 @@ public class CanvasMapView extends View {
                 double metersPerScreenPixel = 156543.03392 * Math.cos(centerLat * Math.PI / 180.0) / (Math.pow(2, tileZoom) * totalScale);
                 for (CadText txt : cadTexts) {
                     float textSizePx = (float) (txt.height / metersPerScreenPixel);
-                    if (textSizePx < 10f) continue; 
+                    if (textSizePx < 10f) continue;
 
                     float cx = (float) ((txt.mx * worldSize - startX) * totalScale);
                     float cy = (float) ((txt.my * worldSize - startY) * totalScale);
 
-                    // 视口剔除：字完全在屏幕外就直接不画
                     if (cx < -100 || cx > width + 100 || cy < -100 || cy > height + 100) continue;
 
                     cadTextPaint.setTextSize(textSizePx);
@@ -954,7 +1116,8 @@ public class CanvasMapView extends View {
         return angleDeg;
     }
 
-    private void drawRoadNameLabels(Canvas canvas, int width, int height, List<Object[]> roadLabels) {
+    private void drawRoadNameLabels(Canvas canvas, int width, int height, List<
+                    Object[]> roadLabels) {
         if (roadNames == null || roadLabels == null || roadLabels.isEmpty()) return;
 
         Paint namePaint = new Paint();
@@ -1093,7 +1256,8 @@ public class CanvasMapView extends View {
                 if (newDist > 10 && lastDist > 10) {
                     float scale = newDist / lastDist;
                     float nextZoom = zoom + (float) (Math.log(scale) / Math.log(2));
-                    if (nextZoom >= 3.0f && nextZoom <= 18.0f) {
+                    // 缩放到 22 级
+                    if (nextZoom >= 3.0f && nextZoom <= 22.0f) {
                         float midX = (event.getX(0) + event.getX(1)) / 2f;
                         float midY = (event.getY(0) + event.getY(1)) / 2f;
                         float dx = midX - getWidth() / 2f;
@@ -1148,7 +1312,8 @@ public class CanvasMapView extends View {
                 float dy = event.getY() - lastTapY;
                 float moveDist = (float) Math.sqrt(dx * dx + dy * dy);
                 if (moveDist < 50) {
-                    float targetZoom = Math.min(18.0f, (float) Math.ceil(zoom) + 1);
+                    // 双击放大到 22 级
+                    float targetZoom = Math.min(22.0f, (float) Math.ceil(zoom) + 1);
                     animateZoom(targetZoom, lastTapX, lastTapY);
                 }
                 lastTapTime = 0;
