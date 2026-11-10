@@ -9,7 +9,8 @@ import java.util.List;
 
 public class MyApp extends Application {
     private static MyApp instance;
-    
+    // 全局保存图纸文档，方便画布读取图层
+    public com.hdm.cad.drawing.Document currentDoc;
     public ProjectData data;
     public String currentProjectName;
     public File currentProjectFile;
@@ -18,12 +19,12 @@ public class MyApp extends Application {
     public List<String> projectNames = new ArrayList<String>();
 
     public BluetoothRtkManager rtkManager;
-    
+
     // RTK 数据状态
     public double currentRtkLat = 0;
     public double currentRtkLon = 0;
     public double currentRtkAlt = 0;
-    public int currentRtkFix = 0; 
+    public int currentRtkFix = 0;
     public boolean hasRtkData = false;
     public boolean rtkConnected = false;
 

@@ -6,7 +6,8 @@ import static com.hdm.cad.entity.EntityBase.*;
 
 public class EntityHeadParser {
 
-    public static CommonEntityHead parseEntityHead(BitStream r, long dataEnd, int feats) throws Exception {
+    public static CommonEntityHead parseEntityHead(BitStream r, long dataEnd, int feats)
+            throws Exception {
         CommonEntityHead head = new CommonEntityHead();
         head.objSizeBit = dataEnd;
         head.auditBitsize = dataEnd;
@@ -35,7 +36,7 @@ public class EntityHeadParser {
 
         head.entityMode = r.readBB();
         head.numReactors = r.readBL();
-        
+
         if ((feats & 0x100) != 0) { // NolinksBit (仅 R2000)
             head.noLinks = r.readB() == 1;
             head.prevNextLinks = true;
@@ -52,15 +53,15 @@ public class EntityHeadParser {
         head.ltypeScale = r.readBD();
         head.ltypeFlags = r.readBB();
         head.plotstyleFlags = r.readBB();
-        
+
         if ((feats & 0x004) != 0) head.materialFlags = r.readBB();
         if ((feats & 0x008) != 0) head.shadowFlags = r.readRC();
         if ((feats & 0x010) != 0) {
             for (int i = 0; i < 3; i++) head.visualStyle[i] = r.readB() != 0;
         }
-        
+
         head.invisible = (short) r.readBS();
-        
+
         if ((feats & 0x020) != 0) head.linewt = r.readRC();
 
         return head;
@@ -71,8 +72,13 @@ public class EntityHeadParser {
         head.color.hasIndex = true;
         if (noLinks != 0) {
             int second = r.readB();
-            if (second == 1) { head.color.index = 256; head.color.flag = 1; }
-            else { head.color.index = 0; head.color.flag = 0; }
+            if (second == 1) {
+                head.color.index = 256;
+                head.color.flag = 1;
+            } else {
+                head.color.index = 0;
+                head.color.flag = 0;
+            }
             return;
         }
         int mode = r.readB();
@@ -84,21 +90,24 @@ public class EntityHeadParser {
         int flags = r.readRS();
         head.color.index = flags & 0x01FF;
         head.color.flag = flags >>> 8;
-        
+
+        // === 补全：解析 Alpha 透明度 ===
         if ((flags & 0x2000) != 0) {
-            long raw = r.readBL();
+            long raw = r.readBL() & 0xFFFFFFFFL;
             head.color.alphaRaw = raw;
             head.color.alphaType = (int) (raw >>> 24);
             head.color.alpha = (int) (raw & 0xFF);
             head.color.hasAlpha = true;
         }
+        // === 补全：解析 TrueColor 真彩色 (红色出不来就是因为漏了这步) ===
         if ((flags & 0x4000) == 0 && (flags & 0x8000) != 0) {
-            head.color.trueColor = r.readBL();
+            head.color.trueColor = r.readBL() & 0xFFFFFFFFL;
             head.color.hasTrue = true;
         }
     }
 
-    public static long[] parseCommonEntityHandles(BitStream r, CommonEntityHead head) throws Exception {
+    public static long[] parseCommonEntityHandles(BitStream r, CommonEntityHead head)
+            throws Exception {
         long owner = 0, layer = 0;
         if (head.entityMode == 0) {
             owner = ObjRecParser.readHandleReference(r, head.handle);
@@ -125,7 +134,8 @@ public class EntityHeadParser {
             if (head.ltypeFlags == 3) ObjRecParser.readHandleReference(r, head.handle);
             if (head.materialFlags == 3) ObjRecParser.readHandleReference(r, head.handle);
             if (head.shadowFlags == 3) ObjRecParser.readHandleReference(r, head.handle);
-            if (head.plotstyleFlags == 3) head.plotstyleHandle = ObjRecParser.readHandleReference(r, head.handle);
+            if (head.plotstyleFlags == 3)
+                head.plotstyleHandle = ObjRecParser.readHandleReference(r, head.handle);
             for (int i = 0; i < 3; i++) {
                 if (head.visualStyle[i]) ObjRecParser.readHandleReference(r, head.handle);
             }

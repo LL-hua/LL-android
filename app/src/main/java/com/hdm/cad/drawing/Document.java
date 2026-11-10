@@ -13,5 +13,8 @@ public class Document {
     public Map<Long, EntityBase> byHandle = new HashMap<>();
     public Map<Long, List<EntityBase>> blocks = new HashMap<>(); // 块句柄 -> 内部实体
 
+    // 👇【新增】：图层字典
+    public Map<Long, Layer> layers = new HashMap<>();
+
     public int entityCount() { return modelSpace.size() + pspaceSpace.size(); }
 }
