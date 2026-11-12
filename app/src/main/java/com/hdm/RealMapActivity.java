@@ -690,7 +690,50 @@ public class RealMapActivity extends BaseNavActivity {
             }
         });
         layout.addView(btnLoadDwg);
+// =========================================================
+// 【文字实时调参面板】
+// =========================================================
+        if (cadGpuView.hasCadData()) {
+            TextView tvTuning = new TextView(this);
+            tvTuning.setText("CAD文字微调 (实时)");
+            tvTuning.setTextSize(14);
+            tvTuning.setTextColor(0xFF0078D4);
+            tvTuning.setPadding(0, dp(16), 0, dp(8));
+            layout.addView(tvTuning);
 
+            // 读取当前保存的值，如果没保存过就用默认值
+            SharedPreferences sp = getSharedPreferences("hdm_config", MODE_PRIVATE);
+            float savedEnScale = sp.getFloat("cad_text_en_scale", 1.85f);
+            float savedEnSpacing = sp.getFloat("cad_text_en_spacing", 1.13f);
+            float savedPunctSpacing = sp.getFloat("cad_text_punct_spacing", 0.63f);
+
+            addSlider(layout, "英文字高:", 1.0f, 2.5f, savedEnScale, new OnSliderChangeListener() {
+                @Override
+                public void onChanged(float val) {
+                    cadGpuView.updateTextParams(val, cadGpuView.getEnSpacing(), cadGpuView.getPunctSpacing());
+                    saveCadTextParams(val, cadGpuView.getEnSpacing(), cadGpuView.getPunctSpacing());
+                }
+            });
+
+            addSlider(layout, "英文间距:", 0.5f, 2.0f, savedEnSpacing, new OnSliderChangeListener() {
+                @Override
+                public void onChanged(float val) {
+                    cadGpuView.updateTextParams(cadGpuView.getEnScale(), val, cadGpuView.getPunctSpacing());
+                    saveCadTextParams(cadGpuView.getEnScale(), val, cadGpuView.getPunctSpacing());
+                }
+            });
+
+            addSlider(layout, "标点压缩:", 0.1f, 1.5f, savedPunctSpacing, new OnSliderChangeListener() {
+                @Override
+                public void onChanged(float val) {
+                    cadGpuView.updateTextParams(cadGpuView.getEnScale(), cadGpuView.getEnSpacing(), val);
+                    saveCadTextParams(cadGpuView.getEnScale(), cadGpuView.getEnSpacing(), val);
+                }
+            });
+        }
+// =========================================================
+// =========================================================
+// =========================================================
         if (cadGpuView.hasCadData()) {
             LinearLayout cadControlRow = new LinearLayout(this);
             cadControlRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -711,12 +754,26 @@ public class RealMapActivity extends BaseNavActivity {
             });
             cadControlRow.addView(btnCadLine);
 
+            // ---- 文字控制按钮 (控制 Canvas 实心字显隐) ----
             TextView btnCadText = new TextView(this);
             btnCadText.setText("文字");
             btnCadText.setTextSize(13);
             btnCadText.setPadding(dp(12), dp(6), dp(12), dp(6));
-            btnCadText.setTextColor(Color.WHITE);
-            btnCadText.setBackground(makeRoundRectBg(0xFF0078D4, 16));
+
+// 初始化按钮状态：去 mapView 里读取真实的显隐状态 (默认关闭是灰色)
+            boolean textOn = mapView.showCadText;
+            btnCadText.setTextColor(textOn ? Color.WHITE : 0xFF555555);
+            btnCadText.setBackground(makeRoundRectBg(textOn ? 0xFF0078D4 : 0xFFE0E0E0, 16));
+
+// 【新增】点击事件：切换状态并刷新界面
+            btnCadText.setOnClickListener(v -> {
+                boolean newState = !mapView.showCadText;
+                mapView.setCadTextVisibility(newState);
+
+                // 动态更新按钮颜色 (开启变蓝，关闭变灰)
+                btnCadText.setTextColor(newState ? Color.WHITE : 0xFF555555);
+                btnCadText.setBackground(makeRoundRectBg(newState ? 0xFF0078D4 : 0xFFE0E0E0, 16));
+            });
             cadControlRow.addView(btnCadText);
 
             layout.addView(cadControlRow);
@@ -1420,10 +1477,15 @@ public class RealMapActivity extends BaseNavActivity {
                             e.printStackTrace();
                         }
 
-                        // 几何给 GPU
+                        // 核心：几何给 GPU
                         cadGpuView.setCadEntities(doc.modelSpace, app);
-                        // 文字给 Canvas（保留保底）
-                        mapView.setCadTextEntities(null, app);
+// 文字给 Canvas (保底)
+                        mapView.setCadTextEntities(doc.modelSpace, app);
+
+// 【新增】图纸加载完后，立即应用本地保存的完美参数
+                        loadAndApplyCadTextParams();
+
+                        Toast.makeText(this, "图纸已贴合地图！图元数: " + doc.modelSpace.size(), Toast.LENGTH_LONG).show();
 
                         Toast.makeText(this, "图纸已贴合地图！图元数: " + doc.modelSpace.size(), Toast.LENGTH_LONG).show();
                         if (settingsDialog != null) settingsDialog.dismiss();
@@ -1436,5 +1498,86 @@ public class RealMapActivity extends BaseNavActivity {
                 runOnUiThread(() -> Toast.makeText(this, "解析失败: " + e.getMessage(), Toast.LENGTH_LONG).show());
             }
         }).start();
+    }
+
+    // 自己定义接口，避免 Termux 环境找不到 java.util.function.Consumer
+    private interface OnSliderChangeListener {
+        void onChanged(float value);
+    }
+
+    private android.os.Handler sliderHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private Runnable sliderRunnable;
+
+    private void addSlider(LinearLayout parent, String labelText, float min, float max, float current, OnSliderChangeListener onChange) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dp(4), 0, dp(4));
+
+        TextView label = new TextView(this);
+        label.setText(labelText);
+        label.setTextSize(13);
+        label.setTextColor(0xFF555555);
+        label.setWidth(dp(80));
+        row.addView(label);
+
+        android.widget.SeekBar seekBar = new android.widget.SeekBar(this);
+        seekBar.setMax(100);
+        int progress = (int) (((current - min) / (max - min)) * 100);
+        seekBar.setProgress(progress);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        seekBar.setLayoutParams(lp);
+        row.addView(seekBar);
+
+        TextView valText = new TextView(this);
+        valText.setText(String.format("%.2f", current));
+        valText.setTextSize(13);
+        valText.setTextColor(0xFF0078D4);
+        valText.setWidth(dp(40));
+        valText.setGravity(android.view.Gravity.RIGHT);
+        row.addView(valText);
+
+        seekBar.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(android.widget.SeekBar sb, int p, boolean fromUser) {
+                float val = min + (max - min) * (p / 100f);
+                valText.setText(String.format("%.2f", val));
+                if (fromUser) {
+                    // 【核心防抖】把原来的 onChange.onChanged(val) 换成防抖延迟执行
+                    if (sliderRunnable != null) {
+                        sliderHandler.removeCallbacks(sliderRunnable);
+                    }
+                    sliderRunnable = () -> onChange.onChanged(val);
+                    sliderHandler.postDelayed(sliderRunnable, 120); // 停止滑动 120 毫秒后才真正去计算
+                }
+            }
+
+            @Override
+            public void onStartTrackingTouch(android.widget.SeekBar sb) {}
+
+            @Override
+            public void onStopTrackingTouch(android.widget.SeekBar sb) {}
+        });
+
+        parent.addView(row);
+    }
+
+    // 保存 CAD 文字调参到本地
+    private void saveCadTextParams(float enScale, float enSpacing, float punctSpacing) {
+        getSharedPreferences("hdm_config", MODE_PRIVATE).edit()
+                .putFloat("cad_text_en_scale", enScale)
+                .putFloat("cad_text_en_spacing", enSpacing)
+                .putFloat("cad_text_punct_spacing", punctSpacing)
+                .apply();
+    }
+
+// 从本地读取 CAD 文字参数并应用到视图
+    private void loadAndApplyCadTextParams() {
+        if (cadGpuView == null) return;
+        SharedPreferences sp = getSharedPreferences("hdm_config", MODE_PRIVATE);
+        float enScale = sp.getFloat("cad_text_en_scale", 1.85f); // 默认值
+        float enSpacing = sp.getFloat("cad_text_en_spacing", 1.13f);
+        float punctSpacing = sp.getFloat("cad_text_punct_spacing", 0.63f);
+        cadGpuView.updateTextParams(enScale, enSpacing, punctSpacing);
     }
 }

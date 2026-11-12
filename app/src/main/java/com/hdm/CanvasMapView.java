@@ -28,6 +28,13 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class CanvasMapView extends View {
+// 控制 Canvas CAD 文字的显隐 (默认关闭)
+    public boolean showCadText = false;
+
+    public void setCadTextVisibility(boolean show) {
+        this.showCadText = show;
+        invalidate(); // 触发重绘
+    }
 
     public interface OnViewportChangedListener {
         void onViewportChanged(double lat, double lng, float zoom);
@@ -578,7 +585,8 @@ public class CanvasMapView extends View {
         }
 
         // CAD 文字
-        if (!cadTexts.isEmpty()) {
+// CAD 文字 (实心字，受开关控制)
+        if (showCadText && !cadTexts.isEmpty()) {
             double worldSize = 256 * Math.pow(2, tileZoom);
             double metersPerScreenPixel = 156543.03392 * Math.cos(centerLat * Math.PI / 180.0) / (Math.pow(2, tileZoom) * totalScale);
             for (CadTextModel txt : cadTexts) {

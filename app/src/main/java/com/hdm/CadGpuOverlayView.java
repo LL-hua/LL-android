@@ -6,23 +6,25 @@ import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
 import android.opengl.Matrix;
 import android.util.AttributeSet;
+
 import com.hdm.cad.entity.ColorResolver;
 import com.hdm.cad.entity.EntityBase;
 import com.hdm.cad.entity.BasicEntities;
 import com.hdm.cad.entity.EntityBase.Point2;
+
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
 
 public class CadGpuOverlayView extends GLSurfaceView {
-    private final CadRenderer renderer = new CadRenderer();
-    private final ExecutorService initExecutor = Executors.newSingleThreadExecutor();
+
+    private CadRenderer renderer;
+    private float scaleFactor = 2.0f;
 
     public CadGpuOverlayView(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -30,29 +32,30 @@ public class CadGpuOverlayView extends GLSurfaceView {
         setEGLConfigChooser(8, 8, 8, 8, 16, 0);
         getHolder().setFormat(android.graphics.PixelFormat.TRANSLUCENT);
         setZOrderOnTop(true);
+
+        renderer = new CadRenderer();
+        renderer.scaleFactor = this.scaleFactor;
         setRenderer(renderer);
         setRenderMode(GLSurfaceView.RENDERMODE_WHEN_DIRTY);
     }
 
-    public void setShxFont(com.hdm.cad.drawing.ShxFontParser parser) {
-        renderer.shxFont = parser;
-    }
-
     public void updateViewport(double lat, double lng, float zoom) {
-        renderer.updateViewportMatrix(lat, lng, zoom);
+        renderer.updateViewport(lat, lng, zoom);
         requestRender();
     }
 
-    public void setCadEntities(final List<EntityBase> entities, final MyApp app) {
+    public void setCadEntities(List<EntityBase> entities, MyApp app) {
         if (entities == null || entities.isEmpty() || app == null || app.data == null) {
-            renderer.clearCadData();
-            requestRender();
+            renderer.clearData();
         } else {
-            initExecutor.submit(() -> {
-                renderer.buildStaticGeometry(entities, app);
-                requestRender();
-            });
+            renderer.buildStaticGeometry(entities, app);
         }
+        requestRender();
+    }
+
+    // === 补上缺失的 SHX 字体设置接口 ===
+    public void setShxFont(com.hdm.cad.drawing.ShxFontParser parser) {
+        renderer.shxFont = parser;
     }
 
     public void setCadVisibility(boolean line, boolean circle) {
@@ -68,7 +71,7 @@ public class CadGpuOverlayView extends GLSurfaceView {
     }
 
     public void clearCad() {
-        renderer.clearCadData();
+        renderer.clearData();
         requestRender();
     }
 
@@ -84,40 +87,95 @@ public class CadGpuOverlayView extends GLSurfaceView {
         return new ArrayList<>();
     }
 
+    // ===== 滑动条参数控制接口 =====
+    public void updateTextParams(float enScale, float enSpacing, float punctSpacing) {
+        renderer.enScale = enScale;
+        renderer.enSpacing = enSpacing;
+        renderer.punctSpacing = punctSpacing;
+        // 只设置标记，把重建任务交给 onDrawFrame 去异步执行
+        renderer.needsRebuild = true;
+        requestRender();
+    }
+
+    public float getEnScale() {
+        return renderer.enScale;
+    }
+
+    public float getEnSpacing() {
+        return renderer.enSpacing;
+    }
+
+    public float getPunctSpacing() {
+        return renderer.punctSpacing;
+    }
+
     private static class CadRenderer implements GLSurfaceView.Renderer {
-        private int program, aPosition, aColor, uMatrix;
-        private volatile FloatBuffer vertexBuffer, colorBuffer;
-        private volatile int vertexCount = 0;
+        private int program;
+        private int aPosition, aColor, uMatrix;
+        private FloatBuffer vertexBuffer, colorBuffer;
+        private int vertexCount = 0;
+
+        private final float[] mvpMatrix = new float[16];
+
         private double centerLat = -4.8, centerLng = 32.5;
         private float zoom = 15f;
+        public float scaleFactor = 2.0f;
         private int viewW = 1, viewH = 1;
-        private final float[] mvpMatrix = new float[16];
-// 加在 CadRenderer 的成员变量区域
+
+        // 缓存原始数据，供动态调参使用
+        public List<EntityBase> rawEntities = null;
+        public MyApp rawApp = null;
+
+        // 字体解析器
         public com.hdm.cad.drawing.ShxFontParser shxFont = null;
-        // 核心精度补丁：记录基准点的墨卡托偏移
+
+        // 动态调参变量
+        // 把之前默认的 1.35, 1.0, 0.4 改成你调好的完美参数
+        public float enScale = 1.85f;
+        public float enSpacing = 1.13f;
+        public float punctSpacing = 0.63f;
+
+// 新增一个标记，告诉 GL 线程需要重建几何
+        public boolean needsRebuild = false;
+
+        // 局部坐标基准
         private double originMercX = 0, originMercY = 0;
 
         public boolean hasData() {
             return vertexCount > 0;
         }
 
-        public synchronized void updateViewportMatrix(double lat, double lng, float z) {
+        public void updateViewport(double lat, double lng, float z) {
             this.centerLat = lat;
             this.centerLng = lng;
             this.zoom = z;
         }
 
-        public synchronized void clearCadData() {
+        public void clearData() {
             vertexCount = 0;
             vertexBuffer = null;
             colorBuffer = null;
+            rawEntities = null;
+            rawApp = null;
         }
 
         @Override
         public void onSurfaceCreated(GL10 gl, EGLConfig config) {
             GLES20.glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-            String vCode = "uniform mat4 u_Matrix;attribute vec4 a_Position;attribute vec4 a_Color;varying vec4 v_Color;void main(){gl_Position=u_Matrix*a_Position;v_Color=a_Color;}";
-            String fCode = "precision mediump float;varying vec4 v_Color;void main(){gl_FragColor=v_Color;}";
+
+            String vCode = "uniform mat4 u_Matrix;" +
+                    "attribute vec4 a_Position;" +
+                    "attribute vec4 a_Color;" +
+                    "varying vec4 v_Color;" +
+                    "void main() {" +
+                    "  gl_Position = u_Matrix * a_Position;" +
+                    "  v_Color = a_Color;" +
+                    "}";
+
+            String fCode = "precision mediump float;" +
+                    "varying vec4 v_Color;" +
+                    "void main() { gl_FragColor = v_Color; }";
+
             int vs = GLES20.glCreateShader(GLES20.GL_VERTEX_SHADER);
             GLES20.glShaderSource(vs, vCode);
             GLES20.glCompileShader(vs);
@@ -128,6 +186,7 @@ public class CadGpuOverlayView extends GLSurfaceView {
             GLES20.glAttachShader(program, vs);
             GLES20.glAttachShader(program, fs);
             GLES20.glLinkProgram(program);
+
             aPosition = GLES20.glGetAttribLocation(program, "a_Position");
             aColor = GLES20.glGetAttribLocation(program, "a_Color");
             uMatrix = GLES20.glGetUniformLocation(program, "u_Matrix");
@@ -136,66 +195,66 @@ public class CadGpuOverlayView extends GLSurfaceView {
         @Override
         public void onSurfaceChanged(GL10 gl, int width, int height) {
             GLES20.glViewport(0, 0, width, height);
-            synchronized (this) {
-                this.viewW = width;
-                this.viewH = height;
-            }
+            this.viewW = width;
+            this.viewH = height;
         }
 
         @Override
         public void onDrawFrame(GL10 gl) {
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
-            FloatBuffer vBuf = this.vertexBuffer;
-            FloatBuffer cBuf = this.colorBuffer;
-            int count = this.vertexCount;
-            if (count == 0 || vBuf == null || cBuf == null) return;
-            double clat, clng;
-            float cz;
-            int w, h;
-            synchronized (this) {
-                clat = centerLat;
-                clng = centerLng;
-                cz = zoom;
-                w = viewW;
-                h = viewH;
+
+            // 【新增】在 GL 线程安全地重建几何，UI 线程不卡顿
+            if (needsRebuild && rawEntities != null && rawApp != null) {
+                buildStaticGeometry(rawEntities, rawApp);
+                needsRebuild = false;
             }
 
-            int tileZoom = (int) Math.floor(cz);
+            if (vertexCount == 0 || vertexBuffer == null || colorBuffer == null) return;
+            // ... 下面原有的绘制代码 ...
+            int tileZoom = (int) Math.floor(zoom);
             double worldSize = 256.0 * Math.pow(2.0, tileZoom);
-            double[] centerWorld = latLngToWorldPixel(clat, clng, tileZoom);
-            float subZoom = (float) Math.pow(2.0, cz - tileZoom);
-            double startX = centerWorld[0] - (w / 2.0) / (2.0f * subZoom);
-            double startY = centerWorld[1] - (h / 2.0) / (2.0f * subZoom);
+            double[] centerWorld = latLngToWorldPixel(centerLat, centerLng, tileZoom);
+            float subZoom = (float) Math.pow(2.0, zoom - tileZoom);
+            float totalScale = scaleFactor * subZoom;
+
+            double startX = centerWorld[0] - (viewW / 2.0) / totalScale;
+            double startY = centerWorld[1] - (viewH / 2.0) / totalScale;
 
             float[] projMat = new float[16];
             float[] transMat = new float[16];
             float[] scaleMat = new float[16];
             float[] tempMat = new float[16];
-            Matrix.orthoM(projMat, 0, 0f, (float) w, (float) h, 0f, -1.0f, 1.0f);
+
+            Matrix.orthoM(projMat, 0, 0f, (float) viewW, (float) viewH, 0f, -1.0f, 1.0f);
             Matrix.setIdentityM(transMat, 0);
-            // 因为 VBO 里存的是相对原点的偏移，这里把原点加回去
             Matrix.translateM(transMat, 0, (float) (-startX + originMercX * worldSize), (float) (-startY + originMercY * worldSize), 0f);
             Matrix.scaleM(transMat, 0, (float) worldSize, (float) worldSize, 1f);
+
             Matrix.setIdentityM(scaleMat, 0);
-            Matrix.scaleM(scaleMat, 0, 2.0f * subZoom, 2.0f * subZoom, 1f);
+            Matrix.scaleM(scaleMat, 0, totalScale, totalScale, 1f);
+
             Matrix.multiplyMM(tempMat, 0, scaleMat, 0, transMat, 0);
             Matrix.multiplyMM(mvpMatrix, 0, projMat, 0, tempMat, 0);
 
             GLES20.glUseProgram(program);
             GLES20.glUniformMatrix4fv(uMatrix, 1, false, mvpMatrix, 0);
+
             GLES20.glEnableVertexAttribArray(aPosition);
-            GLES20.glVertexAttribPointer(aPosition, 2, GLES20.GL_FLOAT, false, 0, vBuf);
+            GLES20.glVertexAttribPointer(aPosition, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer);
             GLES20.glEnableVertexAttribArray(aColor);
-            GLES20.glVertexAttribPointer(aColor, 4, GLES20.GL_FLOAT, false, 0, cBuf);
-            GLES20.glDrawArrays(GLES20.GL_LINES, 0, count);
+            GLES20.glVertexAttribPointer(aColor, 4, GLES20.GL_FLOAT, false, 0, colorBuffer);
+
+            GLES20.glDrawArrays(GLES20.GL_LINES, 0, vertexCount);
+
             GLES20.glDisableVertexAttribArray(aPosition);
             GLES20.glDisableVertexAttribArray(aColor);
         }
 
         public void buildStaticGeometry(List<EntityBase> entities, MyApp app) {
+            this.rawEntities = entities;
+            this.rawApp = app;
             if (entities == null || entities.isEmpty() || app == null || app.data == null) return;
 
-            // 1. 找原点 (浮动原点基准，用于解决大坐标平移精度)
             EntityBase first = entities.get(0);
             double originCadX = 0, originCadY = 0;
             if (first instanceof BasicEntities.EntLine) {
@@ -223,23 +282,9 @@ public class CadGpuOverlayView extends GLSurfaceView {
             List<float[]> pts = new ArrayList<>();
             List<float[]> cls = new ArrayList<>();
 
-            // =========================================================
-            // 【调整点 1】文字大小与间距参数 (自己改这里)
-            // =========================================================
-            // 数字和字母的放大系数。AutoCAD里英文原始高度约64，汉字100。1.6刚好拉平。
-            final double DIGIT_SCALE_FACTOR = 1.6;
-
-            // 标点符号（小数点、逗号、加减号）的横向间距压缩系数。
-            final double PUNCT_ADVANCE_FACTOR = 0.5;
-
-            // 普通空格的宽度占字高的比例。
-            final double SPACE_WIDTH_FACTOR = 0.3;
-            // =========================================================
-
             for (EntityBase ent : entities) {
                 float[] rgb = getColor(ent);
 
-                // ===== 1. 直线 =====
                 if (ent instanceof BasicEntities.EntLine) {
                     BasicEntities.EntLine l = (BasicEntities.EntLine) ent;
                     double[] lb1 = Projection.xy2Gps(l.start.y, l.start.x, app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
@@ -251,9 +296,7 @@ public class CadGpuOverlayView extends GLSurfaceView {
                         cls.add(rgb);
                         cls.add(rgb);
                     }
-                }
-                // ===== 2. 多段线 (含圆弧) =====
-                else if (ent instanceof BasicEntities.EntLwPolyline) {
+                } else if (ent instanceof BasicEntities.EntLwPolyline) {
                     BasicEntities.EntLwPolyline p = (BasicEntities.EntLwPolyline) ent;
                     if (p.vertices != null && p.vertices.size() > 1) {
                         for (int i = 0; i < p.vertices.size() - 1; i++) {
@@ -287,9 +330,7 @@ public class CadGpuOverlayView extends GLSurfaceView {
                             }
                         }
                     }
-                }
-                // ===== 3. 独立圆弧 =====
-                else if (ent instanceof BasicEntities.EntArc) {
+                } else if (ent instanceof BasicEntities.EntArc) {
                     BasicEntities.EntArc arc = (BasicEntities.EntArc) ent;
                     double startA = arc.angleStart, endA = arc.angleEnd;
                     while (endA < startA) endA += 2 * Math.PI;
@@ -306,15 +347,12 @@ public class CadGpuOverlayView extends GLSurfaceView {
                             cls.add(rgb);
                         }
                     }
-                }
-                // ===== 4. 文字 (GPU 渲染 SHX 线框字) =====
-                else if (ent instanceof BasicEntities.EntText) {
+                } else if (ent instanceof BasicEntities.EntText) {
                     BasicEntities.EntText txt = (BasicEntities.EntText) ent;
                     if (txt.text == null || txt.text.isEmpty() || shxFont == null) continue;
 
                     double height = txt.height;
                     double rotation = txt.rotation;
-                    // 若旋转角度大于 2π，大概率是角度制，转成弧度
                     if (Math.abs(rotation) > 6.28) rotation = Math.toRadians(rotation);
 
                     double currentX = txt.insertion.x;
@@ -322,32 +360,23 @@ public class CadGpuOverlayView extends GLSurfaceView {
                     double cos = Math.cos(rotation);
                     double sin = Math.sin(rotation);
 
-                    // SHX 字体满高基准为 100
                     double baseScale = height / 100.0;
 
                     for (int i = 0; i < txt.text.length(); i++) {
                         String ch = String.valueOf(txt.text.charAt(i));
 
-                        // 处理空格
                         if (ch.equals(" ")) {
-                            currentX += height * SPACE_WIDTH_FACTOR * cos;
-                            currentY += height * SPACE_WIDTH_FACTOR * sin;
+                            currentX += height * 0.5 * cos;
+                            currentY += height * 0.5 * sin;
                             continue;
                         }
 
                         com.hdm.cad.drawing.ShxFontParser.Glyph glyph = shxFont.getGlyph(ch);
                         if (glyph == null || glyph.strokes.isEmpty()) continue;
 
-                        // 判断是否为数字/英文字母
-                        boolean isLetterOrDigit = Character.isLetterOrDigit(ch.charAt(0));
+                        boolean isChinese = ch.charAt(0) > 127;
+                        double currentScale = isChinese ? baseScale : (baseScale * enScale);
 
-                        // 计算当前字符的缩放比例
-                        double currentScale = baseScale;
-                        if (isLetterOrDigit) {
-                            currentScale *= DIGIT_SCALE_FACTOR; // 应用放大
-                        }
-
-                        // 渲染线条
                         for (float[] s : glyph.strokes) {
                             double sx1 = s[0] * currentScale, sy1 = s[1] * currentScale;
                             double sx2 = s[2] * currentScale, sy2 = s[3] * currentScale;
@@ -368,27 +397,27 @@ public class CadGpuOverlayView extends GLSurfaceView {
                             }
                         }
 
-                        // 获取真实字宽推进量
-                        double advance = glyph.advance * currentScale;
-
-                        // 如果是标点符号（小数点、逗号、加减号），压缩间距
-                        if (ch.equals(".") || ch.equals(",") || ch.equals("-") || ch.equals("+")) {
-                            advance *= PUNCT_ADVANCE_FACTOR;
+                        double advance = glyph.advance * currentScale * enSpacing;
+                        if (ch.equals(".") || ch.equals("+") || ch.equals("-")) {
+                            advance *= punctSpacing;
+                        }
+                        if (advance < 0.1) {
+                            advance = height * 0.5;
                         }
 
-                        // 防御：如果解析字宽异常，给个保底推进量，防止粘连
-                        if (advance < 0.5) {
-                            advance = isLetterOrDigit ? (height * DIGIT_SCALE_FACTOR * 0.6) : (height * 0.6);
-                        }
-
-                        // 将位置按旋转角推进到下一个字符
                         currentX += advance * cos;
                         currentY += advance * sin;
                     }
                 }
             }
 
-            if (pts.isEmpty()) return;
+            if (pts.isEmpty()) {
+                synchronized (this) {
+                    this.vertexCount = 0;
+                }
+                return;
+            }
+
             float[] vArr = new float[pts.size() * 2];
             float[] cArr = new float[pts.size() * 4];
             for (int i = 0; i < pts.size(); i++) {
@@ -400,9 +429,11 @@ public class CadGpuOverlayView extends GLSurfaceView {
                 cArr[i * 4 + 2] = color[2];
                 cArr[i * 4 + 3] = 1.0f;
             }
+
             ByteBuffer vbb = ByteBuffer.allocateDirect(vArr.length * 4).order(ByteOrder.nativeOrder());
             FloatBuffer vBuffer = vbb.asFloatBuffer().put(vArr);
             vBuffer.position(0);
+
             ByteBuffer cbb = ByteBuffer.allocateDirect(cArr.length * 4).order(ByteOrder.nativeOrder());
             FloatBuffer cBuffer = cbb.asFloatBuffer().put(cArr);
             cBuffer.position(0);
@@ -414,7 +445,43 @@ public class CadGpuOverlayView extends GLSurfaceView {
             }
         }
 
-        // 存相对原点的偏移量
+        private void addArcPts(List<
+                        Point2> out, double x1, double y1, double x2, double y2, double b) {
+            if (Math.abs(b) < 1e-6) {
+                out.add(new Point2(x2, y2));
+                return;
+            }
+            double dx = x2 - x1, dy = y2 - y1;
+            double d = Math.sqrt(dx * dx + dy * dy);
+            if (d < 1e-6) {
+                out.add(new Point2(x2, y2));
+                return;
+            }
+            double coef = (1.0 - b * b) / (4.0 * b);
+            double cx = (x1 + x2) / 2.0 - dy * coef;
+            double cy = (y1 + y2) / 2.0 + dx * coef;
+            double r = Math.sqrt((x1 - cx) * (x1 - cx) + (y1 - cy) * (y1 - cy));
+            double startAngle = Math.atan2(y1 - cy, x1 - cx);
+            double theta = 4.0 * Math.atan(b);
+            int segments = 32;
+            double angleStep = theta / segments;
+            for (int i = 1; i <= segments; i++) {
+                double angle = startAngle + i * angleStep;
+                out.add(new Point2(cx + r * Math.cos(angle), cy + r * Math.sin(angle)));
+            }
+        }
+
+        private float[] getColor(EntityBase ent) {
+            int c = 0xFF000000;
+            if (ent.color != null && ent.color.hasIndex) {
+                int[] res = ColorResolver.aciColor(ent.color.index == 256 ? 7 : ent.color.index, true);
+                if (res[3] == 1) c = Color.rgb(res[0], res[1], res[2]);
+            }
+            if (c == 0xFF000000) c = 0xFFE53935;
+            return new float[]{Color.red(c) / 255f, Color.green(c) / 255f, Color.blue(c) / 255f};
+        }
+
+        // 【核心修复】返回类型改为 float[]，解决全篇类型不匹配的报错
         private float[] latLngToMercOffset(double lat, double lng) {
             double mx = (lng + 180.0) / 360.0;
             if (lat > 85.05112878) lat = 85.05112878;
@@ -423,60 +490,12 @@ public class CadGpuOverlayView extends GLSurfaceView {
             return new float[]{(float) (mx - originMercX), (float) (my - originMercY)};
         }
 
-        // 你的原版，把 i <= 32 改为 i < 32，结尾补 pt2 防止断开
-        private void addArcPts(List out, double x1, double y1, double x2, double y2, double b) {
-            double dx = x2 - x1, dy = y2 - y1, d = Math.sqrt(dx * dx + dy * dy);
-            if (d < 1e-6) return;
-            double cx = (x1 + x2) / 2.0 - dy * ((1.0 - b * b) / (4.0 * b)),
-                    cy = (y1 + y2) / 2.0 + dx * ((1.0 - b * b) / (4.0 * b));
-            double r = Math.sqrt((x1 - cx) * (x1 - cx) + (y1 - cy) * (y1 - cy)),
-                    start = Math.atan2(y1 - cy, x1 - cx),
-                    sweep = 4.0 * Math.atan(b);
-            for (int i = 1; i < 32; i++) {
-                double a = start + i * (sweep / 32.0);
-                out.add(new Point2(cx + r * Math.cos(a), cy + r * Math.sin(a)));
-            }
-            out.add(new Point2(x2, y2)); // 强制终点
-        }
-
-        private float[] getColor(EntityBase ent) {
-            int c = 0xFF000000; // 默认黑色
-
-            if (ent.color != null) {
-                // 1. 优先解析 DWG 的 32 位真彩色 (TrueColor)
-                try {
-                    java.lang.reflect.Field fieldTrueColor = ent.color.getClass().getField("trueColor");
-                    int trueColor = fieldTrueColor.getInt(ent.color);
-                    if (trueColor != 0) {
-                        c = 0xFF000000 | (trueColor & 0xFFFFFF);
-                        return new float[]{Color.red(c) / 255f, Color.green(c) / 255f, Color.blue(c) / 255f};
-                    }
-                } catch (Exception ignored) {
-                }
-
-                // 2. 解析 ACI 索引色
-                if (ent.color.hasIndex) {
-                    // 索引 256 代表 ByLayer (随层)，默认取 7 (白/黑)
-                    int index = ent.color.index == 256 ? 7 : ent.color.index;
-                    int[] res = ColorResolver.aciColor(index, true);
-                    if (res != null && res.length >= 3) {
-                        c = Color.rgb(res[0], res[1], res[2]);
-                    }
-                }
-            }
-
-            // 3. 在白色地图底图下，如果颜色是纯白 (0xFFFFFFFF)，改成深灰色或黑色，否则看不见
-            // 这里因为我们白色底图(Color.LTGRAY/白色)比较多，做个智能反色适配
-            if (c == 0xFFFFFFFF) {
-                c = 0xFF333333; // 白色在浅色底图上变成深灰
-            }
-
-            return new float[]{Color.red(c) / 255f, Color.green(c) / 255f, Color.blue(c) / 255f};
-        }
-
         private double[] latLngToWorldPixel(double lat, double lng, float z) {
             double worldSize = 256 * Math.pow(2, z);
-            return new double[]{(lng + 180.0) / 360.0 * worldSize, (0.5 - Math.log(Math.tan((90.0 + lat) * Math.PI / 360.0)) / (2.0 * Math.PI)) * worldSize};
+            double x = (lng + 180.0) / 360.0 * worldSize;
+            double sinLat = Math.sin(lat * Math.PI / 180.0);
+            double y = (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * worldSize;
+            return new double[]{x, y};
         }
     }
 }
