@@ -45,8 +45,8 @@ import java.util.Set;
 public class RealMapActivity extends BaseNavActivity {
 
     private MyApp app;
-    private CanvasMapView mapView;         // 底层地图 + 文字
-    private CadGpuOverlayView cadGpuView;  // 顶层 GPU CAD 覆盖层 (几何)
+    private CanvasMapView mapView; // 底层地图 + 文字
+    private CadGpuOverlayView cadGpuView; // 顶层 GPU CAD 覆盖层 (几何)
     private LinearLayout content;
 
     private LocationManager lm;
@@ -184,13 +184,15 @@ public class RealMapActivity extends BaseNavActivity {
 
         double[] kb = LL.hua_Fs(currentRoad.pqx, xy[0], xy[1]);
         String stationStr = kb[0] < 0 ? "超出范围" : LL.hua_Num2K(kb[0]);
-        String offsetStr = kb[0] < 0 ? "--" : String.format("%.3f m (%s)", Math.abs(kb[1]), kb[1] < 0 ? "左" : "右");
+        String offsetStr = kb[0] < 0 ? "--" : String.format("%.3f m (%s)", Math.abs(kb[1]), kb[
+                                1] < 0 ? "左" : "右");
 
         if (app.hasRtkData && app.currentRtkFix > 0) {
             stationStr += " [RTK]";
         }
 
-        double[] newLonLat = Projection.xy2Gps(xy[0], xy[1], app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
+        double[] newLonLat = Projection.xy2Gps(xy[0], xy[
+        1], app.data.projection, app.data.controlLonLat, app.data.controlXy, app.data.lonCenter);
 
         if (newLonLat != null && newLonLat.length >= 2) {
             mapView.updateGps(newLonLat[1], newLonLat[0], stationStr, offsetStr);
@@ -1395,9 +1397,33 @@ public class RealMapActivity extends BaseNavActivity {
                     if (doc != null && doc.modelSpace != null) {
                         app.currentDoc = doc;
 
-                        // 核心：几何给 GPU，文字给 Canvas
+                        // 【核心修改】全量加载 1hdm 下的所有 shx 字体
+                        try {
+                            File dir = new File(Environment.getExternalStorageDirectory(), "1hdm");
+                            File[] files = dir.listFiles();
+                            if (files != null) {
+                                List<FileInputStream> fontStreams = new ArrayList<>();
+                                for (File f : files) {
+                                    if (f.isFile() && f.getName().toLowerCase().endsWith(".shx")) {
+                                        fontStreams.add(new FileInputStream(f));
+                                    }
+                                }
+                                if (!fontStreams.isEmpty()) {
+                                    com.hdm.cad.drawing.ShxFontParser parser = new com.hdm.cad.drawing.ShxFontParser(
+                                    fontStreams.toArray(new FileInputStream[0])
+                                    );
+                                    cadGpuView.setShxFont(parser);
+                                    for (FileInputStream fs : fontStreams) fs.close();
+                                }
+                            }
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+
+                        // 几何给 GPU
                         cadGpuView.setCadEntities(doc.modelSpace, app);
-                        mapView.setCadTextEntities(doc.modelSpace, app);
+                        // 文字给 Canvas（保留保底）
+                        mapView.setCadTextEntities(null, app);
 
                         Toast.makeText(this, "图纸已贴合地图！图元数: " + doc.modelSpace.size(), Toast.LENGTH_LONG).show();
                         if (settingsDialog != null) settingsDialog.dismiss();
