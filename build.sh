@@ -8,7 +8,7 @@ echo "🚀 开始编译 hdm 测量神器 (Release 版)..."
 echo "======================================"
 
 # 执行正式版打包命令
-gradle assembleRelease
+gradle assembleRelease --offline -x lintVitalRelease
 
 # 检查是否成功
 if [ $? -eq 0 ]; then

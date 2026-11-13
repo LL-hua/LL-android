@@ -140,6 +140,7 @@ public abstract class BaseNavActivity extends Activity {
     }
 
     protected void showProjectDialog() {
+        // 1. 扫描外部存储 SD 卡
         File sd = Environment.getExternalStorageDirectory();
         File dir = new File(sd, "1hdm");
         if (!dir.exists()) dir.mkdirs();
@@ -157,8 +158,27 @@ public abstract class BaseNavActivity extends Activity {
             }
         }
 
+        // 2. 扫描内置 Assets 目录
+        try {
+            String[] assetFiles = getAssets().list("");
+            if (assetFiles != null) {
+                for (String name : assetFiles) {
+                    if (name.toLowerCase().endsWith(".xlsx")) {
+                        File cacheFile = copyAssetToCache(name);
+                        if (cacheFile != null) {
+                            xlsxFiles.add(cacheFile);
+                            xlsxNames.add("[内置] " + name); // 加个前缀，方便用户区分
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        // 3. 弹出选择框
         if (xlsxFiles.isEmpty()) {
-            Toast.makeText(this, "请把 .xlsx 放到 /sdcard/1hdm/", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "未找到任何项目 (请确保 1hdm 目录或 assets 中有 .xlsx)", Toast.LENGTH_LONG).show();
             return;
         }
 
