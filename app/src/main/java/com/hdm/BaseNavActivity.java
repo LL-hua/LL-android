@@ -23,7 +23,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 public abstract class BaseNavActivity extends Activity {
-
+// 在类成员变量区域添加
+    private int easterEggClicks = 0;
     protected static final String[] TAB_KEYS = {"earth", "layout", "calc", "realmap"};
     protected static final String[] TAB_LABELS = {"土方", "放样", "正反算", "在线地图"};
     protected static final String[] TAB_ICONS = {"土", "放", "算", "地"};
@@ -70,6 +71,34 @@ public abstract class BaseNavActivity extends Activity {
         tvTitle.setText(pageTitle());
         tvTitle.setTextSize(18);
         tvTitle.setTextColor(Color.WHITE);
+
+        // ==========================================
+        // 【隐藏彩蛋】连续点击 5 次标题，触发“土方俄罗斯方块”
+        // ==========================================
+        tvTitle.setOnClickListener(v -> {
+            easterEggClicks++;
+            if (easterEggClicks >= 5) {
+                easterEggClicks = 0; // 重置计数器
+
+                // 创建一个全屏无标题的 Dialog
+                android.app.Dialog gameDialog = new android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+                EarthworkGameView gameView = new EarthworkGameView(this);
+                gameDialog.setContentView(gameView);
+
+                // 监听返回键，按返回键直接退出游戏，回到原来的页面
+                gameDialog.setOnKeyListener((dialog, keyCode, event) -> {
+                    if (keyCode == android.view.KeyEvent.KEYCODE_BACK) {
+                        gameDialog.dismiss();
+                        return true;
+                    }
+                    return false;
+                });
+
+                gameDialog.show();
+            }
+        });
+        // ==========================================
+
         header.addView(tvTitle);
 
         // 新增：路线显示按钮

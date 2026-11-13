@@ -487,8 +487,8 @@ public class CanvasMapView extends View {
                         screenPts.add(new float[]{scrX, scrY});
                 }
                 linePaint.setColor(palette[r % palette.length]);
-                linePaint.setPathEffect(new DashPathEffect(new float[]{16f, 12f}, 0));
-                linePaint.setStrokeWidth(5f);
+                linePaint.setPathEffect(new DashPathEffect(new float[]{12f, 4f}, 0));
+                linePaint.setStrokeWidth(1f);
                 canvas.drawPath(path, linePaint);
                 if (showRoadNames && !screenPts.isEmpty()) {
                     int mi = screenPts.size() / 2;
@@ -533,7 +533,7 @@ public class CanvasMapView extends View {
                 }
                 linePaint.setColor(CURRENT_ROAD_COLOR);
                 linePaint.setPathEffect(null);
-                linePaint.setStrokeWidth(8f);
+                linePaint.setStrokeWidth(2f);
                 canvas.drawPath(path, linePaint);
                 if (showRoadNames && !screenPts.isEmpty()) {
                     int mi = screenPts.size() / 2;
