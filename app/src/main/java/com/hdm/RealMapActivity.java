@@ -554,6 +554,15 @@ public class RealMapActivity extends BaseNavActivity {
         btnCorrection.setOnClickListener(v -> showCorrectionDialog());
         layout.addView(btnCorrection);
 
+// ================= 【新增：配置说明按钮】 =================
+        TextView btnGuide = new TextView(this);
+        btnGuide.setText("📖 数据配置说明 (必看)");
+        btnGuide.setTextSize(16);
+        btnGuide.setTextColor(0xFF0078D4);
+        btnGuide.setPadding(0, 0, 0, dp(16));
+        btnGuide.setOnClickListener(v -> showConfigGuideDialog());
+        layout.addView(btnGuide);
+// =========================================================
         View line0 = new View(this);
         line0.setBackgroundColor(0xFFEEEEEE);
         layout.addView(line0, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
@@ -1597,5 +1606,55 @@ public class RealMapActivity extends BaseNavActivity {
         float enSpacing = sp.getFloat("cad_text_en_spacing", 1.13f);
         float punctSpacing = sp.getFloat("cad_text_punct_spacing", 0.63f);
         cadGpuView.updateTextParams(enScale, enSpacing, punctSpacing);
+    }
+
+    private void showConfigGuideDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        ScrollView scrollView = new ScrollView(this);
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(dp(24), dp(24), dp(24), dp(16));
+
+        TextView title = new TextView(this);
+        title.setText("数据配置说明");
+        title.setTextSize(18);
+        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        title.setTextColor(0xFF333333);
+        layout.addView(title);
+
+        TextView tvContent = new TextView(this);
+        tvContent.setTextSize(14);
+        tvContent.setTextColor(0xFF555555);
+        tvContent.setLineSpacing(0, 1.3f);
+        tvContent.setPadding(0, dp(12), 0, dp(12));
+
+        String guide = "💡 【开箱即用】\n" +
+                "App 已内置了基础项目表格（.xlsx），新安装无需任何配置即可运行。\n\n" +
+                "📁 【如何替换/添加数据】\n" +
+                "请在手机存储根目录下找到文件夹：\n" +
+                "/storage/emulated/0/1hdm/\n" +
+                "（如果没有，打开一次 App 会自动创建）\n\n" +
+                "1️⃣ 项目表格 (.xlsx)\n" +
+                "将您的 Excel 表格放入 1hdm 目录下。点击右上角项目名称即可选择加载。\n\n" +
+                "2️⃣ CAD 图纸 (.dwg)\n" +
+                "将 .dwg 文件放入 1hdm 目录下。如果图纸有特殊字体，请把对应的 .shx 字体文件也放在同一个目录里，系统会自动读取并解析。\n\n" +
+                "3️⃣ 已知控制点 (控制点.txt)\n" +
+                "在 1hdm 目录新建一个文本文件，命名为“控制点.txt”。\n" +
+                "格式要求（每行一个）：\n" +
+                "点名,X坐标,Y坐标\n" +
+                "例如：K1,519000.123,2510000.456\n\n" +
+                "4️⃣ 地图源 (maps.txt)\n" +
+                "在 1hdm 目录下，可通过修改 maps.txt 自定义在线地图的瓦片源。\n" +
+                "格式：名称,URL(包含{x}{y}{z})\n\n" +
+                "🔗 其他说明：\n" +
+                "所有数据均保存在手机本地，不消耗流量。";
+
+        tvContent.setText(guide);
+        layout.addView(tvContent);
+
+        scrollView.addView(layout);
+        builder.setView(scrollView);
+        builder.setPositiveButton("我知道了", null);
+        builder.show();
     }
 }
