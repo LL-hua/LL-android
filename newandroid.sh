@@ -1,8 +1,6 @@
 #!/bin/bash
 
-# 获取项目名，默认为 MyApp
 PROJ_NAME=${1:-"MyApp"}
-# 包名自动跟随项目名（强制转小写，符合 Java 规范）
 PKG="com.$(echo $PROJ_NAME | tr '[:upper:]' '[:lower:]')"
 
 # ================= 1. 自动检测并生成签名文件 =================
@@ -17,7 +15,6 @@ fi
 
 echo "🚀 开始创建项目: $PROJ_NAME (包名: $PKG) ..."
 
-# 如果目录已存在，提示并退出
 if [ -d "$PROJ_NAME" ]; then
     echo "⚠️ 目录 $PROJ_NAME 已存在！请换个名字或手动删除。"
     return 1 2>/dev/null || exit 1
@@ -28,8 +25,7 @@ cd $PROJ_NAME
 mkdir -p app/src/main/java/${PKG//./\/}
 mkdir -p app/src/main/res/values
 
-# 2. 根 build.gradle
-cat > build.gradle << 'EOF'
+cat > build.gradle << 'EOF_INNER'
 buildscript {
     repositories {
         google()
@@ -45,12 +41,11 @@ allprojects {
         mavenCentral()
     }
 }
-EOF
+EOF_INNER
 
 echo "include ':app'" > settings.gradle
 
-# 3. app/build.gradle (使用动态包名)
-cat > app/build.gradle << EOF
+cat > app/build.gradle << EOF_INNER
 apply plugin: 'com.android.application'
 
 android {
@@ -87,12 +82,11 @@ android {
         }
     }
 }
-EOF
+EOF_INNER
 
-# 4. 其它基础文件
 echo "-keep public class * extends android.app.Activity" > app/proguard-rules.pro
 
-cat > app/src/main/AndroidManifest.xml << 'EOF'
+cat > app/src/main/AndroidManifest.xml << 'EOF_INNER'
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application android:allowBackup="true" android:label="App">
@@ -104,10 +98,9 @@ cat > app/src/main/AndroidManifest.xml << 'EOF'
         </activity>
     </application>
 </manifest>
-EOF
+EOF_INNER
 
-# 5. MainActivity.java (使用动态包名)
-cat > app/src/main/java/${PKG//./\/}/MainActivity.java << EOF
+cat > app/src/main/java/${PKG//./\/}/MainActivity.java << EOF_INNER
 package $PKG;
 
 import android.app.Activity;
@@ -124,10 +117,9 @@ public class MainActivity extends Activity {
         setContentView(tv);
     }
 }
-EOF
+EOF_INNER
 
-# 6. 打包脚本
-cat > build.sh << 'EOF'
+cat > build.sh << 'EOF_INNER'
 #!/bin/bash
 echo "🚀 开始编译..."
 gradle assembleRelease
@@ -138,7 +130,7 @@ if [ $? -eq 0 ]; then
 else
     echo "❌ 编译失败！"
 fi
-EOF
+EOF_INNER
 
 chmod +x build.sh
 
